@@ -1,5 +1,7 @@
 (defpackage :keep
-    (:use     #:cl #:ironclad #:anaphora #:clutch #:cl-store))
+    (:use     #:cl #:anaphora #:clutch #:cl-store)
+    (:export  #:compute-metadata #:metadata-error #:file-errors #:repair-file
+	      #:read-metadata-from-file #:write-metadata-to-file))
 
 (in-package :keep)
 
@@ -11,8 +13,11 @@
   hashes
   metadata-hash)
 
-(defmacro with-open-binfile ((handle path)&body body)
-   `(with-open-file (,handle ,path :element-type '(unsigned-byte 8)) ,@body))
+(defun logmsg (level &rest msg)
+  (print (str "[" level "] " msg)))
+
+(defmacro with-open-binfile (params &body body)
+   `(with-open-file (,@params :element-type '(unsigned-byte 8)) ,@body))
 
 (defun compute-hashes (file &optional (chunk-size 4000))
     (with-open-binfile (f file)
@@ -20,7 +25,7 @@
 		  		     :element-type '(unsigned-byte 8))
 	      for pos = (read-sequence seq f)
 	      until (= pos 0)
-	      collect (byte-array-to-hex-string (digest-sequence :sha256 seq :end pos)))))
+	      collect (ironclad:byte-array-to-hex-string (ironclad:digest-sequence :sha256 seq :end pos)))))
 
 (defun compute-metadata-hash (metadata)
    (clutch:sha256 (join "" (metadata-hashes metadata))))
@@ -57,24 +62,26 @@
 
 (defun repair-file (file metadata &rest copies)
   (let ((errors (file-errors file metadata)))
+    (logmsg "DEBUG" "Errors in " file " : chunks " (join ", " (mapcar #'str errors)))
     (let ((seq (make-array (metadata-chunk-size metadata)
    			   :element-type '(unsigned-byte 8))))
-	(with-open-binfile (f file)
+	(with-open-binfile (f file :if-exists :overwrite
+			           :direction :output
+		 	           :if-does-not-exist :error)
 	    (loop for error in errors
-		  do (loop for copy in copies
-			   do (file-position f (* (metadata-chunk-size metadata)
-	  				          error))
+		  do (logmsg "DEBUG" "Trying to repair chunk " error)
+		     (file-position f (* (metadata-chunk-size metadata)
+	  		                 error))
+		     (loop for copy in copies
+			   do (logmsg "DEBUG" "Trying copy " copy)
 			      (with-open-binfile (c copy)
+				(file-position c (* (metadata-chunk-size metadata)
+						    error))
 				(let ((pos (read-sequence seq c)))
-				    (when (string= {(metadata-hashes metadata) error}
-						   (byte-array-to-hex-string (digest-sequence :sha256 seq :end pos)))
-					(write-sequence seq f)
-					(loop-finish))))))))))
-
-
-;--help
-;
-;  hash
-;  check
-;  repair
-;  sync
+				    (if (string= {(metadata-hashes metadata) error}
+					          (ironclad:byte-array-to-hex-string (ironclad:digest-sequence :sha256 seq :end pos)))
+					(progn
+					    (write-sequence seq f :end pos)
+					    (logmsg "DEBUG" "Chunk repair successful")
+					    (loop-finish))
+					(logmsg "DEBUG" "Copy chunk is also broken"))))))))))
