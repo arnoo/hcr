@@ -1,7 +1,7 @@
 (require 'keep)
 
 (defpackage :keep-tests
-    (:use     #:cl #:keep #:anaphora #:clutch))
+    (:use     #:cl #:keep #:clutch))
 
 (in-package :keep-tests)
 

@@ -11,6 +11,6 @@
 (require 'keepcl)
 (clutch:rm "keepcl")
 
-(asdf:make-build :keepcl :type :program :epilogue-code '(keepcl::main) :move-here "./")
+(asdf:make-build :keepcl :type :program :prologue-code '(setf *compile-verbose* nil) :epilogue-code '(keepcl::main) :move-here "./")
 
 (quit)
