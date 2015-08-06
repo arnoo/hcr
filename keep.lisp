@@ -1,19 +1,19 @@
 (defpackage :keep
     (:use     #:cl #:clutch #:cl-store)
-    (:export  #:compute-metadata #:metadata-error #:file-errors #:repair-file
-      	      #:read-metadata-from-file #:write-metadata-to-file #:metadata-chunk-size #:logmsg))
+    (:export  #:compute-meta #:meta-error #:file-errors #:repair-file
+      	      #:read-meta-from-file #:write-meta-to-file #:logmsg))
 
 (in-package :keep)
 
 (defvar *log-level* 1)
 
-(defstruct metadata 
-  metadata-date
+(defstruct-and-export meta 
+  meta-date
   file-date
   file-size
   chunk-size
   hash-tree
-  metadata-hash)
+  meta-hash)
 
 (defun logmsg (level &rest msg)
   (when (<= level *log-level*)
@@ -25,7 +25,7 @@
 (defmacro with-open-binfile (params &body body)
    `(with-open-file (,@params :element-type '(unsigned-byte 8)) ,@body))
 
-(defun hash-hashes (&rest hashes)
+(defun hash-hashes (hashes)
   (loop for tail on hashes
         by [nthcdr 10 _]
         collect (sha256 (join "" (trim tail 10)))))
@@ -36,64 +36,72 @@
         do (pushend (hash-hashes {hashes -1}) hashes)
         finally (return hashes)))
 
-(defun compute-hashes (file &optional (chunk-size 4000))
-  (with-open-binfile (f file)
-    (loop with seq = (make-array chunk-size :element-type '(unsigned-byte 8))
-          for pos = (read-sequence seq f)
-          until (= pos 0)
-          collect (digest-seq seq pos))))
+(defun compute-hashes (file &optional (chunk-size 4096))
+    (mapcar [car (split " " _)]
+            (remove ""
+              (split (str #\Newline)
+                     (sh (str "split -b" chunk-size " --filter=sha256sum '" file "'")))
+              :test 'string=))
+  ;(with-open-binfile (f file)
+  ;  (loop with seq = (make-array chunk-size :element-type '(unsigned-byte 8))
+  ;        for pos = (read-sequence seq f)
+  ;        until (= pos 0)
+  ;        collect (digest-seq seq pos)))
+)
 
-(defun compute-metadata-hash (metadata)
-   (sha256 (str (metadata-file-date metadata) "#" 
-                (metadata-file-size metadata) "#" 
-                (metadata-metadata-date metadata) "#" 
-                (metadata-chunk-size metadata) "#" 
-                {(metadata-hash-tree metadata) -1})))
+(defun compute-meta-hash (meta)
+   (sha256 (str (meta-file-date meta) "#" 
+                (meta-file-size meta) "#" 
+                (meta-meta-date meta) "#" 
+                (meta-chunk-size meta) "#" 
+                {(meta-hash-tree meta) -1})))
 
-(defun compute-metadata (file &optional (chunk-size 4000))
+(defun compute-meta (file &optional (chunk-size 4096))
   (awith
-    (make-metadata
-        :metadata-date (ut)
+    (make-meta
+        :meta-date (ut)
        	:file-date (file-write-date file)
        	:file-size (filesize file)
        	:chunk-size chunk-size
        	:hash-tree (compute-hash-tree file chunk-size))
-    (setf (metadata-metadata-hash it)
-          (compute-metadata-hash it))
+    (setf (meta-meta-hash it)
+          (compute-meta-hash it))
     it))
 
-(defun write-metadata-to-file (metadata file)
+(defun write-meta-to-file (meta file)
   (ungulp file
-          (str (metadata-metadata-date metadata)
+          (str (meta-meta-date meta)
                #\Newline
-               (metadata-file-date metadata)
+               (meta-file-date meta)
                #\Newline
-               (metadata-file-size metadata)
+               (meta-file-size meta)
                #\Newline
-               (metadata-chunk-size metadata)
+               (meta-chunk-size meta)
                #\Newline
-              (join #\Newline (mapcar [join #\; _] (metadata-hash-tree metadata)))
+              (join #\Newline (mapcar [join #\; _] (meta-hash-tree meta)))
                #\Newline
-               (metadata-metadata-hash metadata))
+               (meta-meta-hash meta))
           :if-exists :overwrite))
 
-(defun read-metadata-from-file (file)
-  (let ((data (split (str #\Newline) (gulp file))))
-    (make-metadata
-      :metadata-date (read-from-string {data 0})
+(defun read-meta-from-file (file)
+  (let ((data (remove ""
+                      (split (str #\Newline) (gulp file))
+                      :test 'string=)))
+    (make-meta
+      :meta-date (read-from-string {data 0})
       :file-date (read-from-string {data 1})
       :file-size (read-from-string {data 2})
       :chunk-size (read-from-string {data 3})
       :hash-tree (mapcar [split (str #\;) _] {data 4 -2})
-      :metadata-hash {data -1})))
+      :meta-hash {data -1})))
 
-(defun metadata-error (metadata)
-  (string/= (metadata-metadata-hash metadata)
-            (compute-metadata-hash metadata)))
+(defun meta-error (meta)
+  (string/= (meta-meta-hash meta)
+            (compute-meta-hash meta)))
 
-(defun file-errors (file metadata)
-  (let ((file-hashes (compute-hashes file (metadata-chunk-size metadata)))
-        (correct-hashes (car (metadata-hash-tree metadata))))
+(defun file-errors (file meta)
+  (let ((file-hashes (compute-hashes file (meta-chunk-size meta)))
+        (correct-hashes (car (meta-hash-tree meta))))
     (loop for i from 0
                 below (length correct-hashes)
 	        when (or (> i (- (length file-hashes) 1))
@@ -101,19 +109,19 @@
                              {correct-hashes i}))
           collect i)))
 
-(defun write-chunk-from-copies (dest-handle chunk-index metadata copies)
+(defun write-chunk-from-copies (dest-handle chunk-index meta copies)
   (logmsg 1 "Trying to repair chunk " chunk-index)
-  (file-position dest-handle (* (metadata-chunk-size metadata)
+  (file-position dest-handle (* (meta-chunk-size meta)
                       chunk-index))
-  (let ((seq (make-array (metadata-chunk-size metadata)
+  (let ((seq (make-array (meta-chunk-size meta)
                          :element-type '(unsigned-byte 8))))
     (loop for copy in copies
           do (logmsg 1 "Trying copy " copy)
              (with-open-binfile (c copy)
-                  (file-position c (* (metadata-chunk-size metadata)
+                  (file-position c (* (meta-chunk-size meta)
                                       chunk-index))
                   (let ((pos (read-sequence seq c)))
-                      (if (string= {{(metadata-hash-tree metadata) 0} chunk-index}
+                      (if (string= {{(meta-hash-tree meta) 0} chunk-index}
                                    (digest-seq seq pos))
                           (progn
                               (write-sequence seq dest-handle :end pos)
@@ -121,16 +129,22 @@
                               (loop-finish))
                           (logmsg 1 "Copy chunk is also broken")))))))
 
-(defun repair-file (file metadata copies)
-  (let ((errors (file-errors file metadata)))
+(defun repair-file (file meta copies)
+  (let ((errors (file-errors file meta)))
     (logmsg 1 "Errors in " file " : chunks " (join ", " (mapcar #'str errors)))
     (with-open-binfile (f file :if-exists :overwrite
                                :direction :output
                                :if-does-not-exist :error)
         (loop for error in errors
-              do (write-chunk-from-copies f error metadata copies))))) ;TODO: fix file size ! (how ?)
+              do (write-chunk-from-copies f error meta copies)))
+    (when (/= (file-length file)
+              (meta-file-size meta))
+      (file-truncate file (meta-file-size meta)))))
 
-(defun create-new-file (new-filename metadata &rest copies)
+(defun create-new-file (new-filename meta &rest copies)
   (with-open-binfile (f new-filename :direction :output)
     (loop for chunk-index from 0
-          do (write-chunk-from-copies f chunk-index metadata copies))))
+          do (write-chunk-from-copies f chunk-index meta copies))))
+
+(defun file-truncate (file length) ;TODO: use cffi + make work on windows -> see truncate in osicat ?
+  (sh (str "truncate -s" length " '" file "'")))
