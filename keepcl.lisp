@@ -30,6 +30,28 @@
         (error 'meta-corrupted))
       it)))
 
+(defun mirror-path (src-dir src-path mirror-dir)
+  (merge-path {src-path (length src-dir) -1} mirror-dir))
+
+(defun command-repair ()
+  (let ((target {(argv) 2})
+        (copies {(argv) 3 -1}))
+    (mapcar (lambda (f)
+               (let ((mirrors (mapcar [mirror-path target f _] copies))
+                     (valid-meta))
+                 (loop named find-meta
+                       for copy in (cons f mirrors)
+                       do (block repair
+                            (handler-bind ((meta-condition [return-from repair nil]))
+                              (awith (get-meta copy)
+                                (unless (meta-outdated it file)
+                                  (setf valid-meta it))))))
+                 (if valid-meta
+                    (apply #'repair-file
+                           (append (list f valid-meta mirrors)))
+                    (logmsg 0 "/!\\ can't repair " f ": no valid metadata found"))))
+            (ls target :recursive t :files-only t))))
+    
 (defun command-check ()
   (mapcar #'check-file {(argv) 2 -1}))
 

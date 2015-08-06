@@ -37,17 +37,11 @@
         finally (return hashes)))
 
 (defun compute-hashes (file &optional (chunk-size 4096))
-    (mapcar [car (split " " _)]
-            (remove ""
-              (split (str #\Newline)
-                     (sh (str "split -b" chunk-size " --filter=sha256sum '" file "'")))
-              :test 'string=))
-  ;(with-open-binfile (f file)
-  ;  (loop with seq = (make-array chunk-size :element-type '(unsigned-byte 8))
-  ;        for pos = (read-sequence seq f)
-  ;        until (= pos 0)
-  ;        collect (digest-seq seq pos)))
-)
+  (with-open-binfile (f file)
+    (loop with seq = (make-array chunk-size :element-type '(unsigned-byte 8))
+          for pos = (read-sequence seq f)
+          until (= pos 0)
+          collect (digest-seq seq pos))))
 
 (defun compute-meta-hash (meta)
    (sha256 (str (meta-file-date meta) "#" 
@@ -131,6 +125,7 @@
 
 (defun repair-file (file meta copies)
   (let ((errors (file-errors file meta)))
+    (unless errors (return-from repair-file nil))
     (logmsg 1 "Errors in " file " : chunks " (join ", " (mapcar #'str errors)))
     (with-open-binfile (f file :if-exists :overwrite
                                :direction :output

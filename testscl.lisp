@@ -56,13 +56,13 @@
                       (sh (str "md5sum '" path"'"))))
     (sh (str "./keep check '" path "'"))))
 
-(defun test-repair (file)
+(defun test-repair (file mode)
   (let* ((path (str *testdir* "/" file))
          (sum-before (sh (str "md5sum '" path"'"))))
     (sh (str "./keep hash '" path "'"))
-    (sh (str "./cp '" path "' '" path ".bak'"))
+    (sh (str "cp '" path "' '" path ".bak'"))
     (sh (str "./keep hash '" path ".bak'"))
-    (alter file)
+    (alter file mode)
     (assert (string/= sum-before
                       (sh (str "md5sum '" path"'"))))
     (sh (str "./keep repair '" path "' '" path ".bak'"))
@@ -87,7 +87,13 @@
 (mapcar [test-check _ 3] (remove "empty" *all-root* :test 'string=))
 
 (init-files)
-(mapcar 'test-repair *all-root*)
+(mapcar [test-repair _ 1] (remove "empty" *all-root* :test 'string=))
+
+(init-files)
+(mapcar [test-repair _ 2] (remove "empty" *all-root* :test 'string=))
+
+(init-files)
+(mapcar [test-repair _ 3] (remove "empty" *all-root* :test 'string=))
 
 (init-files)
 (let ((hash (sh (str "./keep hash '" *testdir* "'"))))
@@ -99,7 +105,12 @@
 (let ((hash (sh (str "./keep check '" *testdir* "'"))))
   (assert (= (length (~ "/File .* looks good/" hash))
              (length *all*))))
-(mapcar 'alter *all*)
-;(let ((hash (sh (str "./keep check '" *testdir* "'"))))
-;  (assert (= (length (~ "/File .* looks good/" hash))
-;             (length *all*))))
+(mapcar [alter _ 1] *all*)
+(let ((hash (sh (str "./keep check '" *testdir* "'"))))
+  (assert (= (length (~ "/File .* looks good/" hash))
+             (length *all*))))
+
+;TODO: test repair non broken file
+;TODO: test wrong number of arguments to each command
+;TODO: test all commands with invalid paths
+;TODO: test help
