@@ -31,24 +31,28 @@
       it)))
 
 (defun mirror-path (src-dir src-path mirror-dir)
-  (merge-path {src-path (length src-dir) -1} mirror-dir))
+  (merge-pathnames {src-path (length src-dir) -1} mirror-dir))
 
 (defun command-repair ()
   (let ((target {(argv) 2})
         (copies {(argv) 3 -1}))
     (mapcar (lambda (f)
-               (let ((mirrors (mapcar [mirror-path target f _] copies))
+               (let ((mirrors (if (probe-dir target)
+                                  (mapcar [mirror-path target f _] copies)
+                                  copies))
                      (valid-meta))
                  (loop named find-meta
                        for copy in (cons f mirrors)
                        do (block repair
                             (handler-bind ((meta-condition [return-from repair nil]))
                               (awith (get-meta copy)
-                                (unless (meta-outdated it file)
+                                (unless (meta-outdated it f)
                                   (setf valid-meta it))))))
                  (if valid-meta
-                    (apply #'repair-file
-                           (append (list f valid-meta mirrors)))
+                     (progn
+                       (apply #'repair-file
+                             (append (list f valid-meta mirrors)))
+                       (logmsg 0 "File repaired: " f))
                     (logmsg 0 "/!\\ can't repair " f ": no valid metadata found"))))
             (ls target :recursive t :files-only t))))
     
@@ -80,7 +84,7 @@
     (let* ((meta (get-meta file))
            (errors (file-errors file meta)))
       (cond (errors
-              (logmsg 0 "File " file " has errors in " (meta-chunk-size meta) "b chunks " (join "," (mapcar 'str errors)))
+              (logmsg 0 "File " file " has errors in " (meta-chunk-size meta) "B chunks " (join "," (mapcar 'str errors)))
               4)
             (t
               (logmsg 0 "File " file " looks good")
@@ -128,17 +132,6 @@
         (get-meta dest))))
   0)
 
-(defun copy-file (file dest &key keep-date)
-  (let ((seq (make-array 4096 :element-type '(unsigned-byte 8))))
-    (keep::with-open-binfile (f file)
-      (keep::with-open-binfile (fdest dest :direction :output)
-        (loop for pos = (read-sequence seq f)
-              until (= pos 0)
-              do (write-sequence seq fdest :end pos)))))
-  ; TODO: set file write date to same as original if keep-date (how ?)
-  ; TODO: set file permissions to same as original (how ?)
-)
-
 (defun command-replicate ()
   "Copy hashed srcs to destination. Updates destination if files already exist."
   (let* ((srcs {(argv) 2 -2})
@@ -163,7 +156,7 @@
                    else
                    do (awith (if single-file
                                 dest
-                                (merge-path {file (length src) -1} (probe-file dest)))
+                                (merge-pathnames {file (length src) -1} (probe-file dest)))
                              (incf hashed)
                              (incf errors (replicate file it))))
           finally (if (zerop errors)

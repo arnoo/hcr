@@ -64,9 +64,9 @@
 
 (defun write-meta-to-file (meta file)
   (ungulp file
-          (str (meta-meta-date meta)
+          (str (ut-to-unix (meta-meta-date meta))
                #\Newline
-               (meta-file-date meta)
+               (ut-to-unix (meta-file-date meta))
                #\Newline
                (meta-file-size meta)
                #\Newline
@@ -82,8 +82,8 @@
                       (split (str #\Newline) (gulp file))
                       :test 'string=)))
     (make-meta
-      :meta-date (read-from-string {data 0})
-      :file-date (read-from-string {data 1})
+      :meta-date (unix-to-ut (read-from-string {data 0}))
+      :file-date (unix-to-ut (read-from-string {data 1}))
       :file-size (read-from-string {data 2})
       :chunk-size (read-from-string {data 3})
       :hash-tree (mapcar [split (str #\;) _] {data 4 -2})
@@ -124,22 +124,38 @@
                           (logmsg 1 "Copy chunk is also broken")))))))
 
 (defun repair-file (file meta copies)
-  (let ((errors (file-errors file meta)))
+  (let ((errors (file-errors file meta))
+        (fix-length))
     (unless errors (return-from repair-file nil))
     (logmsg 1 "Errors in " file " : chunks " (join ", " (mapcar #'str errors)))
     (with-open-binfile (f file :if-exists :overwrite
                                :direction :output
                                :if-does-not-exist :error)
         (loop for error in errors
-              do (write-chunk-from-copies f error meta copies)))
-    (when (/= (file-length file)
-              (meta-file-size meta))
-      (file-truncate file (meta-file-size meta)))))
+              do (write-chunk-from-copies f error meta copies))
+        (setf fix-length (/= (file-length file) (meta-file-size meta))))
+     (when fix-length 
+       (file-truncate file (meta-file-size meta)))
+     (file-set-write-date file (meta-file-date meta))))
 
 (defun create-new-file (new-filename meta &rest copies)
   (with-open-binfile (f new-filename :direction :output)
     (loop for chunk-index from 0
           do (write-chunk-from-copies f chunk-index meta copies))))
 
+(defun copy-file (file dest &key keep-date)
+  (let ((seq (make-array 4096 :element-type '(unsigned-byte 8))))
+    (keep::with-open-binfile (f file)
+      (keep::with-open-binfile (fdest dest :direction :output)
+        (loop for pos = (read-sequence seq f)
+              until (= pos 0)
+              do (write-sequence seq fdest :end pos)))))
+    ; TODO: set file permissions to same as original (how ?)
+    (when keep-date
+      (file-set-write-date dest (file-write-date file))))
+
 (defun file-truncate (file length) ;TODO: use cffi + make work on windows -> see truncate in osicat ?
   (sh (str "truncate -s" length " '" file "'")))
+
+(defun file-set-write-date (file universal-time)   
+  (sh (str "touch -d %" (ut-to-unix universal-time) " '" file "'")))  ;TODO: use cffi + make work on windows -> something in osicat ?
