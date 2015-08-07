@@ -7,60 +7,114 @@
 (define-condition meta-open-error (meta-condition) ())
 (define-condition meta-outdated   (meta-condition) ())
 (define-condition meta-corrupted  (meta-condition) ())
+(defvar *log-level* 0)
 
-(defun command-help (&optional message)
+(defmacro defcommand (name shortopts longopts help &rest body)
+  `(progn
+      (defun ,(symb "COMMAND-" (uc name)) ,args
+         ,help
+         (multiple-value-bind (args cmd-options free-args
+                              (getopt (argv)
+                                      ,shortopts
+                                      ,longopts))
+            ,@body))))
+
+(defun main ()
+  (if (argv 1)
+      (if-bind (cmd-fn (find-symbol (str "COMMAND-" (uc (argv 1))) :keepcl))
+         (progn
+           (multiple-value-bind (args cmd-options free-args)
+                                (getopt (argv) "v" '("help"))
+              (setf *log-level* (count "v" cmd-options))
+              (if (in cmd-options "help")
+                  (command-help) ; TODO: display command help !
+                  (funcall cmd-fn))))
+         (progn
+          (logmsg 0 "Unkown command : " (argv 1))
+          (command-help)))
+      (command-help)))
+
+(defun free-args ()
+  (multiple-value-bind (args cmd-options free-args)
+                       (getopt (argv) "" nil)
+    free-args))
+
+(defcommand help ()
   (awhen message
     (logmsg 0 it))
   (logmsg 0 "keep <command> <option> <files>
   available commands :
-   hash
-   check
-   repair <file> <mirrors>
-   replicate <src> <dest>"))
+   hash <file>+
+   check <file>+
+   repair <file> <mirror>+
+   replicate <src>+ <dest>
+   
+Use keep <command> --help for detailed help on a command"))
 
 (defun meta-file-path (file)
   (str file ".kmd"))
 
-(defun get-meta (file)
-  (handler-bind ((file-error [error 'meta-open-error]))
-    (awith (read-meta-from-file (meta-file-path file))
-      (when (meta-outdated it file)
-        (error 'meta-outdated))
-      (when (meta-error it)
-        (error 'meta-corrupted))
-      it)))
+(defun get-meta-from-opts (file)
+  (multiple-value-bind (args opts free-args)
+                       (getopt (argv) "" '("kmd=" "ignore-date"))
+    (awhen (find "kmd" opts)
+      (get-meta file :kmd {opts (+ it 1)} :allow-outdated (in opts "ignore-date")))))
+
+(defun get-meta (file &key kmd allow-outdated)
+  (handler-bind ((file-error (lambda (c) (logmsg 1 "Error opening metadata file: " meta-path)
+                                    (error 'meta-open-error))))
+    (let ((meta-path (or kmd (meta-file-path file))))
+      (awith (read-meta-from-file meta-path)
+        (when (and (not allow-outdated)
+                   (meta-outdated it file))
+          (logmsg 1 "Write date in metadata does not match file date: " file)
+          (error 'meta-outdated))
+        (when (meta-error it)
+          (logmsg 1 "Metadata corrupted: " meta-path)
+          (error 'meta-corrupted))
+        it))))
 
 (defun mirror-path (src-dir src-path mirror-dir)
   (merge-pathnames {src-path (length src-dir) -1} mirror-dir))
 
-(defun command-repair ()
-  (let ((target {(argv) 2})
-        (copies {(argv) 3 -1}))
-    (mapcar (lambda (f)
-               (let ((mirrors (if (probe-dir target)
-                                  (mapcar [mirror-path target f _] copies)
-                                  copies))
-                     (valid-meta))
-                 (loop named find-meta
-                       for copy in (cons f mirrors)
-                       do (block repair
-                            (handler-bind ((meta-condition [return-from repair nil]))
-                              (awith (get-meta copy)
-                                (unless (meta-outdated it f)
-                                  (setf valid-meta it))))))
-                 (if valid-meta
-                     (progn
-                       (apply #'repair-file
-                             (append (list f valid-meta mirrors)))
-                       (logmsg 0 "File repaired: " f))
-                    (logmsg 0 "/!\\ can't repair " f ": no valid metadata found"))))
-            (ls target :recursive t :files-only t))))
+(defcommand repair ()
+  "keep repair [options] <file> <copy>+
+   
+  repairs <file> based on data from copies (<copy>)
+
+  options:
+    --mkd=<file.kmd>: use the following metadata file
+    --ignore-date: ignore the file write date in the specified kmd file (use only if you know what you are doing)"
+    (d-b (target &rest copies)
+         (free-args)
+      (mapcar (lambda (f)
+                 (let ((mirrors (if (probe-dir target)
+                                    (mapcar [mirror-path target f _] copies)
+                                    copies))
+                       (valid-meta))
+                   (aif (get-meta-from-opts target)
+                     (setf valid-meta it)
+                     (loop for copy in (cons f mirrors)
+                           do (describe copy)
+                              (ignore-errors
+                                (awith (get-meta copy :allow-outdated t)
+                                  (if (and (meta-outdated it f)
+                                           (not (in cmd-options "ignore-date")))
+                                    (logmsg 1 "Write date in metadata does not match file date: " copy)
+                                    (setf valid-meta it))))))
+                   (if valid-meta
+                       (progn
+                         (apply #'repair-file
+                               (append (list f valid-meta mirrors)))
+                         (logmsg 0 "File repaired: " f))
+                      (logmsg 0 "/!\\ can't repair " f ": no valid and up-to-date metadata found"))))
+              (ls target :recursive t :files-only t))))
     
-(defun command-check ()
+(defcommand check ()
   (mapcar #'check-file {(argv) 2 -1}))
 
-(defun command-hash ()
-    (loop for file in {(argv) 2 -1}
+(defcommand hash ()
+    (loop for file in (free-args)
           for meta-path = (meta-file-path file)
           do (block hash-file
                 (handler-bind ((meta-condition (lambda (c) (write-meta-to-file (compute-meta file) meta-path)
@@ -79,14 +133,21 @@
 
 (defun check-file (file)
   (handler-bind ((meta-open-error (lambda (c) (logmsg 0 "Can't open meta file for " file)   (return-from check-file 1)))
-                 (meta-outdated   (lambda (c) (logmsg 0 "Meta file is outdated for " file)  (return-from check-file 2)))
                  (meta-corrupted  (lambda (c) (logmsg 0 "Meta file is corrupted for " file) (return-from check-file 3))))
-    (let* ((meta (get-meta file))
+    (let* ((meta (get-meta file :allow-outdated t))
            (errors (file-errors file meta)))
       (cond (errors
-              (logmsg 0 "File " file " has errors in " (meta-chunk-size meta) "B chunks " (join "," (mapcar 'str errors)))
-              4)
+              (if (meta-outdated meta file)
+                (progn (logmsg 0 "/!\\ Write date in metadata does not match file date:" file)
+                       2)
+                (progn (logmsg 0 "/!\\ File " file " has errors in " (meta-chunk-size meta) "B chunks " (join "," (mapcar 'str errors)))
+                       4)))
             (t
+              (when (meta-outdated meta file)
+                (logmsg 1 "Write date for file was incorrect in metadata. Fixed: " file)
+                (setf (meta-file-date meta) (ut-to-unix (file-write-date file)))
+                (setf (meta-meta-date meta) (ut-to-unix (ut)))
+                (write-meta-to-file meta (meta-file-path file)))
               (logmsg 0 "File " file " looks good")
               0)))))
 
@@ -132,7 +193,7 @@
         (get-meta dest))))
   0)
 
-(defun command-replicate ()
+(defcommand replicate ()
   "Copy hashed srcs to destination. Updates destination if files already exist."
   (let* ((srcs {(argv) 2 -2})
          (dest {(argv) -1})
@@ -164,10 +225,3 @@
                       (logmsg 0 "/!\\ Done, but errors occcured /!\\"))
                   (logmsg 0 hashed " file(s) copied")
                   (logmsg 0 unhashed " unhashed file(s) not copied"))))
-
-(defun main ()
-  (if (argv 1)
-      (aif (find-symbol (str "COMMAND-" (uc (argv 1))) :keepcl)
-           (funcall it)
-           (command-help (str "Unkown command : " (argv 1))))
-      (command-help)))

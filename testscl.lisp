@@ -20,6 +20,7 @@
   (create-file "tiny"   "10"  )
   (create-file "small"  "10K" )
   (create-file "medium" "10M" )
+  (create-file "2chunks" "8192" )
   (mkdir (str *testdir* "/subdir/subsubdir"))
   (create-file "subdir/file1"     "10K" )
   (create-file "subdir/file2"     "10K" )
@@ -71,7 +72,7 @@
     (assert (string= sum-before
                      (sh (str "md5sum '" path".bak'"))))))
 
-(defvar *all-root* (list "empty" "tiny" "small" "medium"))
+(defvar *all-root* (list "empty" "tiny" "small" "medium" "2chunks"))
 (defvar *all* (append *all-root* (list "subdir/file1" "subdir/file2" "subdir/subsubdir/file3")))
 
 (init-files)

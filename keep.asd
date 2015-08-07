@@ -32,5 +32,5 @@
   :depends-on (:ironclad
 	       :anaphora
 	       :clutch
-	       :cl-store)
-  )
+	       :unix-options
+	       :cl-store))
