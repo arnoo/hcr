@@ -34,7 +34,8 @@
     ))
 
 (defun alter (file mode)
-  (let* ((path (str *testdir* "/" file)))
+  (let* ((path (str *testdir* "/" file))
+         (wdate (file-write-date path)))
     (case mode
       ((1 2) (with-open-file (f path
                        :if-exists :overwrite
@@ -45,7 +46,8 @@
                     (write-char #\x f))
                  (2 (file-position f (floor (/ (file-length f) 10)))
                     (write-char #\a f)))))
-      (3 (keep::file-truncate path (- (with-open-file (f path) (file-length f)) 1))))))
+      (3 (keep::file-truncate path (- (with-open-file (f path) (file-length f)) 1))))
+      (keep::file-set-write-date path wdate)))
 
 (defun test-check (file mode)
   (let* ((path (str *testdir* "/" file))
@@ -55,37 +57,37 @@
     (alter file mode)
     (assert (string/= sum-before
                       (sh (str "md5sum '" path"'"))))
-    (sh (str "./keep check '" path "'"))))
+    (assert (~ "/File .* has errors/" (sh (str "./keep check '" path "'"))))))
 
 (defun test-repair (file mode)
   (let* ((path (str *testdir* "/" file))
-         (sum-before (sh (str "md5sum '" path"'"))))
+         (sum-before (sh (str "md5sum '" path"' | cut -d\\  -f1"))))
     (sh (str "./keep hash '" path "'"))
     (sh (str "cp '" path "' '" path ".bak'"))
     (sh (str "./keep hash '" path ".bak'"))
     (alter file mode)
     (assert (string/= sum-before
-                      (sh (str "md5sum '" path"'"))))
+                      (sh (str "md5sum '" path"' | cut -d\\  -f1"))))
     (sh (str "./keep repair '" path "' '" path ".bak'"))
     (assert (string= sum-before
-                     (sh (str "md5sum '" path"'"))))
+                     (sh (str "md5sum '" path"' | cut -d\\  -f1"))))
     (assert (string= sum-before
-                     (sh (str "md5sum '" path".bak'"))))))
+                     (sh (str "md5sum '" path".bak' | cut -d\\  -f1"))))))
 
 (defvar *all-root* (list "empty" "tiny" "small" "medium" "2chunks"))
 (defvar *all* (append *all-root* (list "subdir/file1" "subdir/file2" "subdir/subsubdir/file3")))
 
-(init-files)
-(mapcar 'test-hash-single *all-root*)
+;(init-files)
+;(mapcar 'test-hash-single *all-root*)
+;
+;(init-files)
+;(mapcar [test-check _ 1] *all-root*)
+;
+;(init-files)
+;(mapcar [test-check _ 2] *all-root*)
 
-(init-files)
-(mapcar [test-check _ 1] *all-root*)
-
-(init-files)
-(mapcar [test-check _ 2] *all-root*)
-
-(init-files)
-(mapcar [test-check _ 3] (remove "empty" *all-root* :test 'string=))
+;(init-files)
+;(mapcar [test-check _ 3] (remove "empty" *all-root* :test 'string=))
 
 (init-files)
 (mapcar [test-repair _ 1] (remove "empty" *all-root* :test 'string=))
