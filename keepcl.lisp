@@ -7,7 +7,6 @@
 (define-condition meta-open-error (meta-condition) ())
 (define-condition meta-outdated   (meta-condition) ())
 (define-condition meta-corrupted  (meta-condition) ())
-(defvar *log-level* 0)
 (defvar *commands* (mkhash))
 (defstruct cmd opts doc fn)
 
@@ -18,20 +17,22 @@
            :doc ,doc
            :fn (lambda (opts free-args) ,@body))))
 
-(defun main ()
-  (unless (argv 1)
+(defun main (&rest args)
+  (unless args
+    (setf args (argv)))
+  (unless {args 1}
     (exit-with-help))
-  (let* ((cmd-name (lc (argv 1)))
+  (let* ((cmd-name (lc {args 1}))
          (cmd {*commands* cmd-name})
          (cmd-opts (when cmd (group [= (length _) 1] (cmd-opts cmd)))))
     (unless cmd
       (logmsg 0 "Unkown command : " cmd-name)
       (exit-with-help))
     (m-v-b (args opts free-args)
-           (getopt (argv 2 -1)
-                   (str {cmd-opts t})
+           (getopt {args 2 -1}
+                   (str {cmd-opts t} "v")
                    {cmd-opts nil})
-       (setf *log-level* (count "v" opts))
+       (setf keep:*log-level* (count "v" opts :test #'string=))
        (when (in opts "help")
          (exit-with-help cmd-name))
        ;TODO: exit with help if invalid opts

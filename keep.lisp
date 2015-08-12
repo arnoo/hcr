@@ -2,7 +2,7 @@
 
     (:use     #:cl #:clutch #:cl-store)
     (:export  #:compute-meta #:meta-error #:file-errors #:repair-file #:copy-file
-      	      #:read-meta-from-file #:write-meta-to-file #:logmsg))
+      	      #:read-meta-from-file #:write-meta-to-file #:logmsg #:*log-level*))
 
 (in-package :keep)
 

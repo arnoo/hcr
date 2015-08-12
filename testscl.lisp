@@ -16,11 +16,11 @@
   (princ (str "Setting up" #\Newline))
   (rm *testdir* :recursive t)
   (mkdir *testdir*)
-  (create-file "empty"  "0"   )
-  (create-file "tiny"   "10"  )
-  (create-file "small"  "10K" )
-  (create-file "medium" "10M" )
-  (create-file "2chunks" "8192" )
+  (create-file "empty"  "0"    )
+  (create-file "tiny"   "10"   )
+  (create-file "small"  "10K"  )
+  (create-file "medium" "10M"  )
+  (create-file "2chunks" "8192")
   (mkdir (str *testdir* "/subdir/subsubdir"))
   (create-file "subdir/file1"     "10K" )
   (create-file "subdir/file2"     "10K" )
@@ -30,8 +30,7 @@
   (let ((path (str *testdir* "/" file)))
     (assert (~ "/Hash for .* written/" (sh (str "./keep hash '" path "'"))))
     (assert (probe-file (str path ".kmd")))
-    (assert (~ "/Found up-to-date hash/" (sh (str "./keep hash '" path "'"))))
-    ))
+    (assert (~ "/Found up-to-date hash/" (sh (str "./keep hash '" path "'"))))))
 
 (defun alter (file mode)
   (let* ((path (str *testdir* "/" file))
@@ -112,6 +111,11 @@
 (let ((hash (sh (str "./keep check '" *testdir* "'"))))
   (assert (= (length (~ "/File .* looks good/" hash))
              (length *all*))))
+
+(assert (~ "/File not found/" (sh "./keep check adfsdfasgjh")))
+(assert (~ "/File not found/" (sh "./keep repair asdfasdf /tmp/keeptest/tiny")))
+(assert (~ "/File not found/" (sh "./keep repair /tmp/keeptest/tiny asdfasdfasd")))
+(assert (~ "/File not found/" (sh "./keep hasn asdfasdfasd")))
 
 ;TODO: test repair non broken file
 ;TODO: test wrong number of arguments to each command
