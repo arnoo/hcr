@@ -1,12 +1,13 @@
 (defpackage :keep
-
     (:use     #:cl #:clutch #:cl-store)
     (:export  #:compute-meta #:meta-error #:file-errors #:repair-file #:copy-file
-      	      #:read-meta-from-file #:write-meta-to-file #:logmsg #:*log-level*))
+      	      #:read-meta-from-file #:write-meta-to-file #:logmsg #:*log-level* #:*output*))
 
 (in-package :keep)
+(declaim (optimize debug))
 
 (defvar *log-level* 1)
+(defvar *output* *standard-output*)
 
 (defstruct-and-export meta 
   meta-date
@@ -18,7 +19,7 @@
 
 (defun logmsg (level &rest msg)
   (when (<= level *log-level*)
-    (princ (str (x "*" level) msg #\Newline))))
+    (princ (str (x "*" level) msg #\Newline) *output*)))
 
 (defun digest-seq (seq &optional end)
   (ironclad:byte-array-to-hex-string (ironclad:digest-sequence :sha256 seq :end end)))

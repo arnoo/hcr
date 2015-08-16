@@ -3,4 +3,4 @@ keep: build.lisp keep.lisp keepcl.lisp
 	mv keepcl keep
 
 tests: keep
-	sbcl --load testscl.lisp
+	ecl -load testscl.lisp

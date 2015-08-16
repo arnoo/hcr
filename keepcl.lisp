@@ -1,7 +1,9 @@
 (defpackage :keepcl
-   (:use     #:cl #:clutch #:keep #:unix-options))
+   (:use     #:cl #:clutch #:keep #:unix-options)
+   (:export  #:main))
 
 (in-package :keepcl)
+(declaim (optimize debug))
 
 (define-condition meta-condition  (error) ())
 (define-condition meta-open-error (meta-condition) ())
@@ -9,6 +11,8 @@
 (define-condition meta-corrupted  (meta-condition) ())
 (defvar *commands* (mkhash))
 (defstruct cmd opts doc fn)
+(defvar *output* *standard-output*)
+(declaim (special *output*))
 
 (defmacro defcmd (name (&rest opts) doc &rest body)
   `(setf (gethash ,(lc name) *commands*)
@@ -18,25 +22,33 @@
            :fn (lambda (opts free-args) ,@body))))
 
 (defun main (&rest args)
-  (unless args
-    (setf args (argv)))
-  (unless {args 1}
-    (exit-with-help))
-  (let* ((cmd-name (lc {args 1}))
-         (cmd {*commands* cmd-name})
-         (cmd-opts (when cmd (group [= (length _) 1] (cmd-opts cmd)))))
-    (unless cmd
-      (logmsg 0 "Unkown command : " cmd-name)
-      (exit-with-help))
-    (m-v-b (args opts free-args)
-           (getopt {args 2 -1}
-                   (str {cmd-opts t} "v")
-                   {cmd-opts nil})
-       (setf keep:*log-level* (count "v" opts :test #'string=))
-       (when (in opts "help")
-         (exit-with-help cmd-name))
-       ;TODO: exit with help if invalid opts
-       (funcall (cmd-fn cmd) opts free-args))))
+  (let* ((from-shell (not args))
+         (*output* (if from-shell *standard-output* (make-string-output-stream)))
+         (exit-code
+           (catch 'exit 
+             (setf args (if args
+                            (cons "keep" args)
+                            (argv)))
+             (unless {args 1}
+               (exit-with-help))
+             (let* ((cmd-name (lc {args 1}))
+                    (cmd {*commands* cmd-name})
+                    (cmd-opts (when cmd (group [= (length _) 1] (cmd-opts cmd)))))
+               (unless cmd
+                 (logmsg 0 "Unkown command : " cmd-name)
+                 (exit-with-help))
+               (m-v-b (args opts free-args)
+                      (getopt {args 2 -1}
+                              (str {cmd-opts t} "v")
+                              {cmd-opts nil})
+                  (setf *log-level* (count "v" opts :test #'string=))
+                  (when (in opts "help")
+                    (exit-with-help cmd-name))
+                  ;TODO: exit with help if invalid opts
+                  (funcall (cmd-fn cmd) opts free-args))))))
+      (if from-shell
+          (exit exit-code)
+          (values (get-output-stream-string *output*) exit-code))))
 
 (defun exit-with-help (&optional cmd-name)
   (if cmd-name
@@ -51,7 +63,7 @@ Available commands :
    ls <path>+
 
 Use keep <command> --help for detailed help on a command"))
-  (exit 9))
+  (throw 'exit 9))
 
 (defun meta-file-path (file)
   (str file ".kmd"))
@@ -100,7 +112,7 @@ Use keep <command> --help for detailed help on a command"))
   (loop for path in (flatten paths)
         when (not (probe-file path))
         do (logmsg 0 "File not found: " path)
-           (exit 99)))
+           (throw 'exit 99)))
 
 (defun meta-outdated (meta file)
   (/= (file-write-date file)
@@ -169,7 +181,7 @@ Use keep <command> --help for detailed help on a command"))
   0)
 
 (defcmd repair ("kmd=" "ignore-date")
-  "keep repair [options] <file> <copy>+
+  "keep repair [options] <file> <copy>*
    
   repairs <file> based on data from copies (<copy>)
 
@@ -240,7 +252,7 @@ Use keep <command> --help for detailed help on a command"))
     (when (and (not single-file)
                (not (probe-dir dest)))
        (logmsg 0 "When copying multiple files, destination must be a directory")
-       (exit 1))
+       (throw 'exit 1))
     (loop with unhashed = 0
           with hashed = 0
           with errors = 0

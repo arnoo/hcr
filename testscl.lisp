@@ -1,6 +1,6 @@
 (ql:quickload 'clutch)
 (ql:quickload 'anaphora)
-(ql:quickload 'keep)
+(ql:quickload 'keepcl)
 (defpackage :keep-testscl
     (:use     #:cl #:clutch))
 
@@ -8,6 +8,7 @@
 
 (defvar *testdir* "/tmp/keeptest")
 (trace sh)
+(trace keepcl:main)
 
 (defun create-file (name size)
   (sh (str "dd if=/dev/urandom iflag=count_bytes count=" size " of='" *testdir* "/" name "'")))
@@ -28,9 +29,15 @@
 
 (defun test-hash-single (file)
   (let ((path (str *testdir* "/" file)))
-    (assert (~ "/Hash for .* written/" (sh (str "./keep hash '" path "'"))))
+    (m-v-b (output exit-code)
+           (keepcl:main "hash" path)
+      (assert (~ "/Hash for .* written/" output))
+      ;TODO(assert (= exit-code)))
+    )
     (assert (probe-file (str path ".kmd")))
-    (assert (~ "/Found up-to-date hash/" (sh (str "./keep hash '" path "'"))))))
+    (m-v-b (output exit-code)
+           (keepcl:main "hash" path)
+      (assert (~ "/Found up-to-date hash/" output)))))
 
 (defun alter (file mode)
   (let* ((path (str *testdir* "/" file))
@@ -51,43 +58,44 @@
 (defun test-check (file mode)
   (let* ((path (str *testdir* "/" file))
          (sum-before (sh (str "md5sum '" path "'"))))
-    (assert (~ "/Hash for .* written/" (sh (str "./keep hash '" path "'"))))
-    (assert (~ "/File .* looks good/" (sh (str "./keep check '" path "'"))))
+    (assert (~ "/Hash for .* written/" (keepcl:main "hash" path)))
+    (assert (~ "/File .* looks good/" (keepcl:main "check" path)))
     (alter file mode)
     (assert (string/= sum-before
-                      (sh (str "md5sum '" path"'"))))
-    (assert (~ "/File .* has errors/" (sh (str "./keep check '" path "'"))))))
+                      (sh (str "md5sum '" path "'"))))
+    (assert (~ "/File .* has errors/" (keepcl:main "check" path)))))
 
 (defun test-repair (file mode)
   (let* ((path (str *testdir* "/" file))
-         (sum-before (sh (str "md5sum '" path"' | cut -d\\  -f1"))))
-    (sh (str "./keep hash '" path "'"))
+         (sum-before (sh (str "md5sum '" path "' | cut -d\\  -f1"))))
+    (keepcl:main "hash" path)
     (sh (str "cp '" path "' '" path ".bak'"))
-    (sh (str "./keep hash '" path ".bak'"))
+    (keepcl:main "hash" (str path ".bak"))
     (alter file mode)
     (assert (string/= sum-before
-                      (sh (str "md5sum '" path"' | cut -d\\  -f1"))))
-    (sh (str "./keep repair '" path "' '" path ".bak'"))
+                      (sh (str "md5sum '" path "' | cut -d\\  -f1"))))
+    (keepcl:main "repair" path (str path ".bak"))
     (assert (string= sum-before
-                     (sh (str "md5sum '" path"' | cut -d\\  -f1"))))
+                     (sh (str "md5sum '" path "' | cut -d\\  -f1"))))
     (assert (string= sum-before
-                     (sh (str "md5sum '" path".bak' | cut -d\\  -f1"))))))
+                     (sh (str "md5sum '" path ".bak' | cut -d\\  -f1"))))))
 
 (defvar *all-root* (list "empty" "tiny" "small" "medium" "2chunks"))
 (defvar *all* (append *all-root* (list "subdir/file1" "subdir/file2" "subdir/subsubdir/file3")))
 
-;(init-files)
-;(mapcar 'test-hash-single *all-root*)
-;
-;(init-files)
-;(mapcar [test-check _ 1] *all-root*)
-;
-;(init-files)
-;(mapcar [test-check _ 2] *all-root*)
+(init-files)
+(mapcar 'test-hash-single *all-root*)
 
-;(init-files)
-;(mapcar [test-check _ 3] (remove "empty" *all-root* :test 'string=))
+(init-files)
+(mapcar [test-check _ 1] *all-root*)
 
+(init-files)
+(mapcar [test-check _ 2] *all-root*)
+
+(init-files)
+(mapcar [test-check _ 3] (remove "empty" *all-root* :test 'string=))
+
+;=== test repair on various kinds of brokenness for a single file  ===
 (init-files)
 (mapcar [test-repair _ 1] (remove "empty" *all-root* :test 'string=))
 
@@ -97,27 +105,89 @@
 (init-files)
 (mapcar [test-repair _ 3] (remove "empty" *all-root* :test 'string=))
 
+;=== test repair on non broken file ===
 (init-files)
-(let ((hash (sh (str "./keep hash '" *testdir* "'"))))
-  (assert (= (length (~ "/Hash for .* written/" hash))
+(let* ((path (str *testdir* "/small"))
+       (sum-before (sh (str "md5sum '" path "' | cut -d\\  -f1"))))
+  (keepcl:main "hash" path)
+  (sh (str "cp '" path "' '" path ".bak'"))
+  (keepcl:main "hash" (str path ".bak"))
+  (keepcl:main "repair" path (str path ".bak"))
+  (assert (string= sum-before
+                   (sh (str "md5sum '" path "' | cut -d\\  -f1"))))
+  (assert (string= sum-before
+                   (sh (str "md5sum '" path ".bak' | cut -d\\  -f1")))))
+
+;TODO: test repair broken file with itself
+;(init-files)
+;(let* ((path (str *testdir* "/small"))
+;       (sum-before (sh (str "md5sum '" path "' | cut -d\\  -f1"))))
+;  (keepcl:main "hash" path)
+;  (alter "small" 2)
+;  (assert (string/= sum-before
+;                    (sh (str "md5sum '" path "' | cut -d\\  -f1"))))
+;  (m-v-b (output exit-code)
+;         (keepcl:main "repair" path path)
+;
+;         )
+;  (assert (string/= sum-before
+;                    (sh (str "md5sum '" path "' | cut -d\\  -f1")))))
+
+;TODO: test repair file that is valid except for data appended to it with itself
+;TODO: test repair non broken file with broken file
+;TODO: test repair broken file with other broken file (elsewhere)
+;TODO: test repair broken file with other broken file in same chunk
+;TODO: test wrong number of arguments to each command
+
+
+(init-files)
+(m-v-b (output exit-code)
+       (keepcl:main "hash" *testdir*)
+  (assert (= (length (~ "/Hash for .* written/g" output))
              (length *all*))))
-(let ((hash (sh (str "./keep hash '" *testdir* "'"))))
-  (assert (= (length (~ "/Found up-to-date hash/" hash))
+(m-v-b (output exit-code)
+       (keepcl:main "hash" *testdir*)
+  (assert (= (length (~ "/Found up-to-date hash/g" output))
              (length *all*))))
-(let ((hash (sh (str "./keep check '" *testdir* "'"))))
-  (assert (= (length (~ "/File .* looks good/" hash))
+(m-v-b (output exit-code)
+       (keepcl:main "check" *testdir*)
+  (assert (= (length (~ "/File .* looks good/g" output))
              (length *all*))))
 (mapcar [alter _ 1] *all*)
-(let ((hash (sh (str "./keep check '" *testdir* "'"))))
-  (assert (= (length (~ "/File .* looks good/" hash))
+(m-v-b (output exit-code)
+       (keepcl:main "check" *testdir*)
+  (assert (= (length (~ "/File .* looks good/g" output))
              (length *all*))))
 
-(assert (~ "/File not found/" (sh "./keep check adfsdfasgjh")))
-(assert (~ "/File not found/" (sh "./keep repair asdfasdf /tmp/keeptest/tiny")))
-(assert (~ "/File not found/" (sh "./keep repair /tmp/keeptest/tiny asdfasdfasd")))
-(assert (~ "/File not found/" (sh "./keep hasn asdfasdfasd")))
+(m-v-b (output exit-code)
+       (keepcl:main "asdf")
+  (assert (~ "/Unknown command/" ) output)
+  (assert (= 9 exit-code)))
+(m-v-b (output exit-code)
+       (sh "./keep")
+  (assert (= 9 exit-code)))
+(m-v-b (output exit-code)
+       (keepcl:main "check" "adfsdfasgjh")
+  (assert (~ "/File not found/" ) output)
+  (assert (= 99 exit-code)))
+(m-v-b (output exit-code)
+       (keepcl:main "repair" "asdfasdf" "/tmp/keeptest/tiny")
+  (assert (~ "/File not found/" ) output)
+  (assert (= 99 exit-code)))
+(m-v-b (output exit-code)
+       (keepcl:main "repair" "/tmp/keeptest/tiny asdfasdfasd")
+  (assert (~ "/File not found/" ) output)
+  (assert (= 99 exit-code)))
+(m-v-b (output exit-code)
+       (keepcl:main "hasn" "asdfasdfasd")
+  (assert (~ "/File not found/" ) output)
+  (assert (= 99 exit-code)))
+(m-v-b (output exit-code)
+       (keepcl:main "hasn" "asdfasdfasd")
+  (assert (~ "/File not found/" ) output)
+  (assert (= 99 exit-code)))
 
-;TODO: test repair non broken file
-;TODO: test wrong number of arguments to each command
 ;TODO: test all commands with invalid paths
 ;TODO: test help
+;TODO: test replicate
+;TODO: test repair folder
