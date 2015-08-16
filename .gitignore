@@ -1,0 +1,6 @@
+.*.swp
+*~
+*.fas
+*.fasl
+*.o
+keep
