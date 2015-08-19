@@ -15,6 +15,7 @@
   file-size
   chunk-size
   hash-tree
+  version
   meta-hash)
 
 (defun logmsg (level &rest msg)
@@ -66,7 +67,9 @@
 
 (defun write-meta-to-file (meta file)
   (ungulp file
-          (str (ut-to-unix (meta-meta-date meta))
+          (str "kmd1"
+               #\Newline
+               (ut-to-unix (meta-meta-date meta))
                #\Newline
                (ut-to-unix (meta-file-date meta))
                #\Newline
@@ -74,21 +77,22 @@
                #\Newline
                (meta-chunk-size meta)
                #\Newline
-              (join #\Newline (mapcar [join #\; _] (meta-hash-tree meta)))
+               (join #\Newline (mapcar [join #\; _] (meta-hash-tree meta)))
                #\Newline
                (meta-meta-hash meta))
           :if-exists :overwrite))
 
 (defun read-meta-from-file (file)
   (let ((data (remove ""
-                      (split (str #\Newline) (gulp file))
+                      (split (str #\Newline) {(gulp file) 4 -1})
                       :test 'string=)))
     (make-meta
-      :meta-date (unix-to-ut (read-from-string {data 0}))
-      :file-date (unix-to-ut (read-from-string {data 1}))
-      :file-size (read-from-string {data 2})
-      :chunk-size (read-from-string {data 3})
-      :hash-tree (mapcar [split (str #\;) _] {data 4 -2})
+      :version (read-from-string {{data 0} 3 -1})
+      :meta-date (unix-to-ut (read-from-string {data 1}))
+      :file-date (unix-to-ut (read-from-string {data 2}))
+      :file-size (read-from-string {data 3})
+      :chunk-size (read-from-string {data 4})
+      :hash-tree (mapcar [split (str #\;) _] {data 5 -2})
       :meta-hash {data -1})))
 
 (defun meta-error (meta)

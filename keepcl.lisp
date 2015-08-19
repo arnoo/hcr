@@ -72,6 +72,11 @@ Use keep <command> --help for detailed help on a command"))
   (awhen (find name opts :test 'string=)
     {opts (+ it 1)}))
 
+(defun is-meta-file (path)
+  (and (probe-file path)
+       (~ "/\\.kmd$/" path)
+       (= "kmd" (gulp path :limit 3))))
+
 (defun get-meta (file &key kmd ignore-date ignore-checksum explicit-errors)
   (let ((meta-path (or kmd (meta-file-path file))))
     (handler-bind ((file-error (lambda (c) (logmsg (if explicit-errors 0 1) "Error opening metadata file: " meta-path)
@@ -105,8 +110,11 @@ Use keep <command> --help for detailed help on a command"))
         (progn
           (apply #'repair-file
                 (append (list target valid-meta mirrors)))
-          (logmsg 0 "File repaired: " target))
-       (logmsg 0 "/!\\ can't repair " target ": no valid and up-to-date metadata found"))))
+          (logmsg 0 "File repaired: " target)
+          (return-from repair-single-file 0))
+        (progn
+          (logmsg 0 "/!\\ can't repair " target ": no valid and up-to-date metadata found")
+          (return-from repair-single-file 1)))))
 
 (defun exit-unless-paths-exist (&rest paths)
   (loop for path in (flatten paths)
@@ -193,21 +201,27 @@ Use keep <command> --help for detailed help on a command"))
   (d-b (target &rest copies)
        free-args
     (exit-unless-paths-exist target copies)
-    (if (probe-dir target)
-        (mapcar (lambda (f) (repair-single-file f
-                                           (mapcar [mirror-path target f _] copies)
-                                           :target-dir target))
-                (ls target :recursive t :files-only t))
-        (repair-single-file target copies :kmd (opt-param opts "kmd")
-                                          :ignore-date (in opts "ignore-date")))))
+    (awith (if (probe-dir target)
+               (mapcar (lambda (f) (repair-single-file f
+                                                  (mapcar [mirror-path target f _] copies)
+                                                  :target-dir target))
+                       (ls target :recursive t :files-only t))
+               (list (repair-single-file target copies :kmd (opt-param opts "kmd")
+                                                       :ignore-date (in opts "ignore-date"))))
+        (logmsg 0 (count 0 it) " file(s) repaired")
+        (logmsg 0 (length (remove-if #'zerop it)) " file(s) not repaired")
+        (reduce #'+ it))))
     
 (defcmd check ("kmd=")
-  "TODO"
+  "TODO: doc for check"
   (unless free-args
     (exit-with-help "check"))
   (exit-unless-paths-exist free-args)
-  (mapcar [check-single-file _ :kmd (opt-param opts "kmd")]
-          (apply #'list-hashed-files free-args)))
+  (awith (mapcar [check-single-file _ :kmd (opt-param opts "kmd")]
+                 (apply #'list-hashed-files free-args))
+      (logmsg 0 (count 0 it) " file(s) OK")
+      (logmsg 0 (length (remove-if #'zerop it)) " file(s) with errors")
+      (reduce #'+ it)))
 
 (defcmd hash ("kmd=")
   "Computes metadata for the files passed in arguments."
@@ -220,16 +234,19 @@ Use keep <command> --help for detailed help on a command"))
     (logmsg 0 "Can't hash multiple files into a single kmd."))
   (loop for file in (flatten (mapcar [ls _ :recursive t :files-only t] free-args))
         for meta-path = (meta-file-path file)
-        do (block hash-file
-              (handler-bind ((meta-condition (lambda (c) (write-meta-to-file (compute-meta file) meta-path)
-                                                    (case (type-of c)
-                                                       ('meta-open-error (logmsg 0 "Hash for " file " written to " meta-path))
-                                                       ('meta-outdated   (logmsg 0 "Updated hash for " file " written to " meta-path))
-                                                       ('meta-corrupted  (logmsg 0 "Updated hash /!\\ original corrupted /!\\ for " file " written to " meta-path))
-                                                       (otherwise (error c)))
-                                                    (return-from hash-file nil))))
-               (get-meta file)
-               (logmsg 0 "Found up-to-date hash for " file " in " meta-path)))))
+        when (is-meta-file meta-path)
+        do (describe file)
+           (describe meta-path)
+           (block hash-file
+             (handler-bind ((meta-condition (lambda (c) (write-meta-to-file (compute-meta file) meta-path)
+                                                   (case (type-of c)
+                                                      ('meta-open-error (logmsg 0 "Hash for " file " written to " meta-path))
+                                                      ('meta-outdated   (logmsg 0 "Updated hash for " file " written to " meta-path))
+                                                      ('meta-corrupted  (logmsg 0 "Updated hash /!\\ original corrupted /!\\ for " file " written to " meta-path))
+                                                      (otherwise (error c)))
+                                                   (return-from hash-file nil))))
+              (get-meta file)
+              (logmsg 0 "Found up-to-date hash for " file " in " meta-path)))))
 
 (defcmd ls ()
   "List hashed files in the specified paths"
@@ -258,7 +275,7 @@ Use keep <command> --help for detailed help on a command"))
           with errors = 0
           for src in (mapcar 'probe-file srcs)
           do (loop for file in (ls src :files-only t :recursive t)
-                   when (not (probe-file (meta-file-path file)))
+                   when (not (is-meta-file (meta-file-path file)))
                    do (incf unhashed)
                    else
                    do (awith (if single-file

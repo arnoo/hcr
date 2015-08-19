@@ -13,6 +13,9 @@
 (defun create-file (name size)
   (sh (str "dd if=/dev/urandom iflag=count_bytes count=" size " of='" *testdir* "/" name "'")))
 
+(defun md5sum (path)
+  (md5 (gulp path)))
+
 (defun init-files ()
   (princ (str "Setting up" #\Newline))
   (rm *testdir* :recursive t)
@@ -57,28 +60,31 @@
 
 (defun test-check (file mode)
   (let* ((path (str *testdir* "/" file))
-         (sum-before (sh (str "md5sum '" path "'"))))
+         (sum-before (md5sum path)))
     (assert (~ "/Hash for .* written/" (keepcl:main "hash" path)))
-    (assert (~ "/File .* looks good/" (keepcl:main "check" path)))
+    (m-v-b (output exit-code)
+           (keepcl:main "check" path)
+      (assert (~ "/File .* looks good/" output))
+      (assert (= 0 exit-code)))
     (alter file mode)
     (assert (string/= sum-before
-                      (sh (str "md5sum '" path "'"))))
+                      (md5sum path)))
     (assert (~ "/File .* has errors/" (keepcl:main "check" path)))))
 
 (defun test-repair (file mode)
   (let* ((path (str *testdir* "/" file))
-         (sum-before (sh (str "md5sum '" path "' | cut -d\\  -f1"))))
+         (sum-before (md5sum path)))
     (keepcl:main "hash" path)
     (sh (str "cp '" path "' '" path ".bak'"))
     (keepcl:main "hash" (str path ".bak"))
     (alter file mode)
     (assert (string/= sum-before
-                      (sh (str "md5sum '" path "' | cut -d\\  -f1"))))
+                      (md5sum path)))
     (keepcl:main "repair" path (str path ".bak"))
     (assert (string= sum-before
-                     (sh (str "md5sum '" path "' | cut -d\\  -f1"))))
+                     (md5sum path)))
     (assert (string= sum-before
-                     (sh (str "md5sum '" path ".bak' | cut -d\\  -f1"))))))
+                     (md5sum path)))))
 
 (defvar *all-root* (list "empty" "tiny" "small" "medium" "2chunks"))
 (defvar *all* (append *all-root* (list "subdir/file1" "subdir/file2" "subdir/subsubdir/file3")))
@@ -108,30 +114,29 @@
 ;=== test repair on non broken file ===
 (init-files)
 (let* ((path (str *testdir* "/small"))
-       (sum-before (sh (str "md5sum '" path "' | cut -d\\  -f1"))))
+       (sum-before (md5sum path)))
   (keepcl:main "hash" path)
   (sh (str "cp '" path "' '" path ".bak'"))
   (keepcl:main "hash" (str path ".bak"))
   (keepcl:main "repair" path (str path ".bak"))
   (assert (string= sum-before
-                   (sh (str "md5sum '" path "' | cut -d\\  -f1"))))
+                   (md5sum path)))
   (assert (string= sum-before
-                   (sh (str "md5sum '" path ".bak' | cut -d\\  -f1")))))
+                   (md5sum path))))
 
-;TODO: test repair broken file with itself
-;(init-files)
-;(let* ((path (str *testdir* "/small"))
-;       (sum-before (sh (str "md5sum '" path "' | cut -d\\  -f1"))))
-;  (keepcl:main "hash" path)
-;  (alter "small" 2)
-;  (assert (string/= sum-before
-;                    (sh (str "md5sum '" path "' | cut -d\\  -f1"))))
-;  (m-v-b (output exit-code)
-;         (keepcl:main "repair" path path)
-;
-;         )
-;  (assert (string/= sum-before
-;                    (sh (str "md5sum '" path "' | cut -d\\  -f1")))))
+;repair broken file with itself
+(init-files)
+(let* ((path (str *testdir* "/small"))
+       (sum-before (md5sum path)))
+  (keepcl:main "hash" path)
+  (alter "small" 2)
+  (assert (string/= sum-before
+                    (md5sum path)))
+  (m-v-b (output exit-code)
+         (keepcl:main "repair" path path)
+    (assert (= exit-code 0)))
+  (assert (string/= sum-before
+                    (md5sum path))))
 
 ;TODO: test repair file that is valid except for data appended to it with itself
 ;TODO: test repair non broken file with broken file
@@ -191,3 +196,4 @@
 ;TODO: test help
 ;TODO: test replicate
 ;TODO: test repair folder
+;TODO: test corrupt metadata in all commands
