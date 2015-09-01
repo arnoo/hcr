@@ -13,7 +13,7 @@ Keep
   
 Example use cases:
   * You keep your family pictures on your personal NAS. Keep computes checksums for all your photos, and synchronizes additions to a backup server (or an online service). When a picture on either the master or the backup servers is broken, Keep logs the issue and repairs the broken file.
-  * You receive your *income statement* by email. Attached along with the statement is a kmd file. You keep both in your email, and a copy in your personal computer. Keep can be used to check the validity of either file and repair them if necessary.
+  * You receive your pay slip by email. Attached along with the statement is a kmd file. You keep both in your email, and a copy in your personal computer. Keep can be used to check the validity of either file and repair them if necessary.
   
 
 Command line interface

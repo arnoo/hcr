@@ -60,7 +60,6 @@ Available commands :
    check <path>+
    repair <file> <mirror>+
    replicate <src>+ <dest>
-   ls <path>+
 
 Use keep <command> --help for detailed help on a command"))
   (throw 'exit 9))
@@ -229,38 +228,29 @@ Use keep <command> --help for detailed help on a command"))
     (exit-with-help "hash"))
   (exit-unless-paths-exist free-args)
   (when (and (in opts "kmd")
-             (or (> (length free-args) 1)
-                 (probe-dir {free-args 0})))
+             (> (length free-args) 1))
     (logmsg 0 "Can't hash multiple files into a single kmd."))
   (mapcar (lambda (file) 
-             (let ((meta-path (meta-file-path file)))
-                (block hash-file
-                       (logmsg 1 "Hashing file " file)
-                       (describe file)
-                       (when (is-meta-file file)
-                          (logmsg 0 file " is a meta file. Skipping.")
-                          (return-from hash-file nil))
-                       (describe file)
-                       (handler-bind ((meta-condition (lambda (c) (describe file)
-                                                             (write-meta-to-file (compute-meta file) meta-path)
-                                                             (case (type-of c)
-                                                                ('meta-open-error (logmsg 0 "Hash for " file " written to " meta-path))
-                                                                ('meta-outdated   (logmsg 0 "Updated hash for " file " written to " meta-path))
-                                                                ('meta-corrupted  (logmsg 0 "Updated hash /!\\ original corrupted /!\\ for " file " written to " meta-path))
-                                                                (otherwise (error c)))
-                                                             (return-from hash-file nil))))
-                        (get-meta file)
-                        (logmsg 0 "Found up-to-date hash for " file " in " meta-path)))))
-          (flatten (mapcar [ls _ :recursive t :files-only t] free-args))))
-
-(defcmd ls ()
-  "List hashed files in the specified paths"
-  (unless (>= (length free-args) 1)
-    (exit-with-help "ls"))
-  (exit-unless-paths-exist free-args)
-  (mapcar [format nil
-                  (list-hashed-files _)]
-          free-args))
+             (block hash-file
+               (when (probe-dir file)
+                  (logmsg 0 file " is a directory. Skipping.")
+                  (return-from hash-file nil))
+               (logmsg 1 "Hashing file " file)
+               (when (is-meta-file file)
+                  (logmsg 0 file " is a meta file. Skipping.")
+                  (return-from hash-file nil))
+               (let ((meta-path (meta-file-path file)))
+                 (handler-bind ((meta-condition (lambda (c) (write-meta-to-file (compute-meta file) meta-path)
+                                                       (case (type-of c)
+                                                          ('meta-open-error (logmsg 0 "Hash for " file " written to " meta-path))
+                                                          ('meta-outdated   (logmsg 0 "Updated hash for " file " written to " meta-path))
+                                                          ('meta-corrupted  (logmsg 0 "Updated hash /!\\ original corrupted /!\\ for " file " written to " meta-path))
+                                                          (otherwise (error c)))
+                                                       (return-from hash-file nil))))
+                   (get-meta file)
+                   (logmsg 0 "Found up-to-date hash for " file " in " meta-path)))))
+          free-args)
+  0)
 
 (defcmd replicate ()
   "Copy hashed srcs to destination. Updates destination if files already exist."

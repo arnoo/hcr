@@ -29,8 +29,8 @@
   :serial t
   :version 0.1
   :components ((:file "keepcl"))
-  :depends-on (:ironclad
-	       :anaphora
-	       :clutch
-	       :keep)
+  :depends-on (:anaphora
+	             :clutch
+               :ironclad
+	             :keep)
   )
