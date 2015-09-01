@@ -84,7 +84,7 @@
 
 (defun read-meta-from-file (file)
   (let ((data (remove ""
-                      (split (str #\Newline) {(gulp file) 4 -1})
+                      (split (str #\Newline) (gulp file))
                       :test 'string=)))
     (make-meta
       :version (read-from-string {{data 0} 3 -1})
