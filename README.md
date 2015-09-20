@@ -8,12 +8,13 @@ Keep is not a replacement for regular backups.
 
 Keep
   * creates a digest file (with a kmd - Keep MetaData - extension) that it stores next to your files.
-  * can synchronize multiple copies of your files, ensuring errors are not replicated
+  * can use this digest file to check the integrity of the corresponding file or a copy
   * repairs broken files from a copy that is either sound or broken in another place (Keep checksums your files by chunks for this purpose)
+  * can synchronize multiple copies of your files, ensuring errors are fixed instead of being propagated as in most backup software
   
 Example use cases:
-  * You keep your family pictures on your personal NAS. Keep computes checksums for all your photos, and synchronizes additions to a backup server (or an online service). When a picture on either the master or the backup servers is broken, Keep logs the issue and repairs the broken file.
-  * You receive your pay slip by email. Attached along with the statement is a kmd file. You keep both in your email, and a copy in your personal computer. Keep can be used to check the validity of either file and repair them if necessary.
+  * You keep your family pictures on your personal NAS. Keep computes checksums for all your photos, and synchronizes additions to a backup server (or an online service). When a picture on either the master or the backup servers is broken, Keep logs the issue, does not transfer the error to the other copy, and repairs the broken file.
+  * You receive your pay slip by email. Attached along with the statement is a kmd file. You keep both in your email, and a copy in your personal computer. Keep can be used to check the validity of either copy and repair it if necessary.
   
 
 Command line interface

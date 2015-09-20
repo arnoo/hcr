@@ -32,5 +32,5 @@
   :depends-on (:anaphora
 	             :clutch
                :ironclad
-	             :keep)
-  )
+               :named-readtables
+	             :keep))

@@ -1,10 +1,11 @@
 (defpackage :keep
-    (:use     #:cl #:clutch #:cl-store)
+    (:use     #:cl #:clutch #:cl-store #:named-readtables)
     (:export  #:compute-meta #:meta-error #:file-errors #:repair-file #:copy-file
       	      #:read-meta-from-file #:write-meta-to-file #:logmsg #:*log-level* #:*output*))
 
 (in-package :keep)
 (declaim (optimize debug))
+(in-readtable clutch)
 
 (defvar *log-level* 1)
 (defvar *output* *standard-output*)
