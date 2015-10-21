@@ -1,3 +1,22 @@
+;
+;   Copyright 2014-2015 Arnaud Bétrémieux <arnaud@btmx.fr>
+;
+;   This file is a part of Keep.
+;
+;   The program in this file is free software: you can redistribute it
+;   and/or modify it under the terms of the GNU General Public License
+;   as published by the Free Software Foundation, either version 3 of
+;   the License, or (at your option) any later version.
+;
+;   This program is distributed in the hope that it will be useful,
+;   but WITHOUT ANY WARRANTY; without even the implied warranty of
+;   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;   GNU General Public License for more details.
+;
+;   You should have received a copy of the GNU General Public License
+;   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+;
+
 (defpackage :keep
     (:use     #:cl #:clutch #:cl-store #:named-readtables)
     (:export  #:compute-meta #:meta-error #:file-errors #:repair-file #:copy-file
@@ -131,8 +150,9 @@
                             (progn
                                 (write-sequence seq dest-handle :end pos)
                                 (logmsg 1 "Chunk repair successful")
-                                (loop-finish))
-                            (logmsg 1 "Copy chunk is also broken"))))))))
+                                (return-from write-chunk-from-copies 0))
+                            (logmsg 1 "Copy chunk is also broken")))))
+      (return-from write-chunk-from-copies 1))))
 
 (defun fix-file-length (file meta)
   (let ((needs-fix))
@@ -148,10 +168,12 @@
   (let ((errors (file-errors file meta)))
     (unless errors (return-from repair-file nil))
     (logmsg 1 "Errors in " file " : chunks " (join ", " (mapcar #'str errors)))
-    (loop for error in (remove-if [>= _ (length (car (meta-hash-tree meta)))] errors)
-          do (write-chunk-from-copies file error meta copies))
-    (fix-file-length file meta)
-    (file-set-write-date file (meta-file-date meta))))
+    (prog1
+      (reduce #'+
+              (mapcar (lambda (err) (write-chunk-from-copies file err meta copies))
+                      (remove-if [>= _ (length (car (meta-hash-tree meta)))] errors)))
+      (fix-file-length file meta)
+      (file-set-write-date file (meta-file-date meta)))))
 
 (defun create-new-file (new-filename meta &rest copies)
   (loop for chunk-index from 0 below (length (car (meta-hash-tree meta)))

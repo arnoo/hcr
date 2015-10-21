@@ -1,3 +1,22 @@
+;
+;   Copyright 2014-2015 Arnaud Bétrémieux <arnaud@btmx.fr>
+;
+;   This file is a part of Keep.
+;
+;   The program in this file is free software: you can redistribute it
+;   and/or modify it under the terms of the GNU General Public License
+;   as published by the Free Software Foundation, either version 3 of
+;   the License, or (at your option) any later version.
+;
+;   This program is distributed in the hope that it will be useful,
+;   but WITHOUT ANY WARRANTY; without even the implied warranty of
+;   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;   GNU General Public License for more details.
+;
+;   You should have received a copy of the GNU General Public License
+;   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+;
+
 (ql:quickload 'clutch)
 (ql:quickload 'anaphora)
 (ql:quickload 'keepcl)
@@ -26,31 +45,35 @@
 (defun md5sum (path)
   (sh (str "md5sum '" path "' | cut -d\\  -f1")))
 
-(defun init-files ()
+(defvar +test-files+
+  (list  (cons "empty"                   "0")
+         (cons "tiny"                    "10")
+         (cons "small"                   "10K")
+         (cons "medium"                  "10M")
+         (cons "2chunks"                 "8192")
+         (cons "subdir/file1"            "10K")
+         (cons "subdir/file2"            "10K")
+         (cons "subdir/subsubdir/file3"  "10K")))
+
+(defun init-files (&rest which)
   (princ (str "Setting up" #\Newline))
   (rm *testdir* :recursive t)
   (mkdir *testdir*)
-  (create-file "empty"  "0"    )
-  (create-file "tiny"   "10"   )
-  (create-file "small"  "10K"  )
-  (create-file "medium" "10M"  )
-  (create-file "2chunks" "8192")
   (mkdir (str *testdir* "/subdir/subsubdir"))
-  (create-file "subdir/file1"     "10K" )
-  (create-file "subdir/file2"     "10K" )
-  (create-file "subdir/subsubdir/file3"  "10K" ))
+  (loop for file in (or which (mapcar 'car +test-files+))
+        do (create-file file (cdr (assoc file +test-files+ :test 'string=)))))
 
 (defun test-hash-single (file)
   (let ((path (str *testdir* "/" file)))
     (m-v-b (output exit-code)
            (keepcl "hash" path)
       (is (~ "/Hash for .* written/" output))
-      ;TODO(is (= exit-code)))
-    )
+      (is (= 0 exit-code)))
     (is (probe-file (str path ".kmd")))
     (m-v-b (output exit-code)
            (keepcl "hash" path)
-      (is (~ "/Found up-to-date hash/" output)))))
+      (is (~ "/Found up-to-date hash/" output))
+      (is (= 0 exit-code)))))
 
 (defun alter (file mode &optional (overwrite-chunk 1))
   (let* ((path (str *testdir* "/" file))
@@ -132,7 +155,7 @@
   (mapcar [test-repair _ :shorten] (remove "empty" *all-root* :test 'string=)))
 
 (test repair-non-broken-file
-  (init-files)
+  (init-files "small")
   (let* ((path (str *testdir* "/small"))
          (sum-before (md5sum path)))
     (keepcl "hash" path)
@@ -145,7 +168,7 @@
                      (md5sum path)))))
 
 (test repair-broken-file-with-itself
-  (init-files)
+  (init-files "small")
   (let* ((path (str *testdir* "/small"))
          (sum-before (md5sum path)))
     (keepcl "hash" path)
@@ -154,12 +177,12 @@
                   (md5sum path)))
     (m-v-b (output exit-code)
            (keepcl "repair" path path)
-      (is (= exit-code 0))) ;TODO: should not be zero since the file could not be repaired + check text output
+      (is (= exit-code 1)))  ;TODO: check text output
     (is (string/= sum-before
                       (md5sum path)))))
 
 (test repair-file-with-data-appended-with-itself
-  (init-files)
+  (init-files "small")
   (let* ((path (str *testdir* "/small"))
          (sum-before (md5sum path)))
     (keepcl "hash" path)
@@ -173,7 +196,7 @@
                      (md5sum path)))))
 
 (test repair-non-broken-file-with-broken-file
-  (init-files)
+  (init-files "small")
   (let* ((path (str *testdir* "/small"))
          (sum-before (md5sum path)))
     (keepcl "hash" path)
@@ -186,7 +209,7 @@
                      (md5sum path)))))
 
 (test repair-very-broken-file
-  (init-files)
+  (init-files "small")
   (let* ((path (str *testdir* "/small"))
          (sum-before (md5sum path)))
     (keepcl "hash" path)
@@ -203,7 +226,7 @@
                      (md5sum path)))))
 
 (test repair-broken-file-with-file-broken-elsewhere
-  (init-files)
+  (init-files "small")
   (let* ((path (str *testdir* "/small"))
          (sum-before (md5sum path)))
     (keepcl "hash" path)
@@ -217,7 +240,7 @@
                      (md5sum path)))))
 
 (test hash-with-corrupt-metadata
-  (init-files)
+  (init-files "small")
   (let* ((path (str *testdir* "/small"))
          (kmd-path (str path ".kmd")))
     (keepcl "hash" path)
@@ -299,13 +322,100 @@
     (is (~ "/File not found/" output))
     (is (= 99 exit-code))))
 
+; TODO check that sync correctly copies (and updates) permissions and write/access dates. check sync with permission issues (source, dest, src and dst kmds)
 
-;TODO: test replicate
+(test sync-single-file ()
+  (init-files "small")
+  (let* ((path (str *testdir* "/small"))
+         (sum-before (md5sum path)))
+    (m-v-b (output exit-code)
+           (keepcl "sync" path (str path ".bak"))
+      (is (~ "/Done, no errors occured/" output))
+      (is (~ "/1 file(s) copied/" output))
+      (is (= (file-write-date path) (file-write-date (str path ".bak"))))
+      (is (= 0 exit-code)))
+    (is (string= sum-before
+                 (md5sum (str path ".bak"))))))
+
+(defmacro test-single-file-solvable-sync (&body body)
+  `(progn
+     (init-files "small")
+     (let* ((path (str *testdir* "/small")))
+       (keepcl "hash" path)
+       (keepcl "sync" path (str path ".bak"))
+       ,@body
+       (m-v-b (output exit-code)
+              (keepcl "sync" path (str path ".bak"))
+         (is (= 0 exit-code)))
+       (m-v-b (output exit-code)
+              (keepcl "check" path (str path ".bak"))
+         (is (= 0 exit-code)))
+       (is (string= (md5sum path) (md5sum path ".bak")))
+       (is (string= (md5sum (str path ".kmd")) (md5sum path ".bak.kmd"))))))
+
+(test sync-single-file-over-broken-dest ()
+  (test-single-file-solvable-sync
+    (alter "small.bak" :overwrite)
+    (is (string/= sum-before
+                  (md5sum (str path ".bak"))))))
+
+(test sync-single-updated-file-over-broken-dest ()
+  (test-single-file-solvable-sync
+    (alter "small.bak" :overwrite)
+    (alter "small" :overwrite)
+    (keep::file-set-write-date path (ut))))
+
+(test sync-single-over-dest-with-broken-kmd ()
+  (test-single-file-solvable-sync
+    (alter "small.bak.kmd" :overwrite)))
+
+(test sync-single-over-broken-dest-with-broken-kmd ()
+; TODO: This is not a solvable case: we would upgrade a valid but outdated copy with one that might be invalid (because updated). What's the right course of action ? On the other hand, running keep hash on the updated file would update the kmd...
+;  (test-single-file-solvable-sync
+;    (alter "small.bak" :overwrite)
+;    (alter "small" :overwrite)
+;    (keep::file-set-write-date path (ut))
+;    (alter "small.bak.kmd" :overwrite))
+)
+
+(test sync-single-file-with-broken-kmd ()
+  (test-single-file-solvable-sync
+    (alter "small.kmd" :overwrite)))
+
+(test sync-single-updated-file-over-dest-with-broken-kmd ()
+  (test-single-file-solvable-sync
+    (alter "small.bak.kmd" :overwrite)
+    (alter "small" :overwrite)
+    (keep::file-set-write-date path (ut))))
+
+(test sync-single-file-over-updated-dest ()
+  ;TODO. Original should not be updated
+)
+
+(test sync-single-broken-file-over-updated-dest ()
+  ;TODO. Original should not be updated
+)
+
+(test sync-single-broken-file-over-updated-dest-with-broken-kmd ()
+  ;TODO. Original should not be updated
+)
+
+(test sync-single-broken-file-over-broken-elsewhere-dest ()
+  ;TODO. Original should not be updated
+)
+
+(test sync-single-broken-file-over-broken-elsewhere-dest-repair-src ()
+  ;TODO. Original should be fixed
+)
+
+(test sync-dir-with-various-failure-cases ()
+  ;TODO: hash should be updated locally
+)
 
 ;TODO: test repair unwritable file, test repair with unreadable file, with unredable kmd
 
 (test hash-over-non-readable-kmd ()
-  (init-files)
+  (init-files "small")
   (let* ((path (str *testdir* "/small")))
     (sh (str "touch '" *testdir* "/small'"))
     (sh (str "chmod -r '" *testdir* "/small'"))
@@ -315,7 +425,7 @@
       (is (= 2 exit-code)))))
 
 (test hash-non-readable-file ()
-  (init-files)
+  (init-files "small")
   (let* ((path (str *testdir* "/small")))
     (is (~ "/Hash for .* written/" (keepcl "hash" path)))
     (sh (str "chmod -r '" *testdir* "/small'"))
@@ -325,7 +435,7 @@
       (is (= 2 exit-code)))))
 
 (test check-with-non-readable-kmd ()
-  (init-files)
+  (init-files "small")
   (let* ((path (str *testdir* "/small")))
     (is (~ "/Hash for .* written/" (keepcl "hash" path)))
     (sh (str "chmod -r '" *testdir* "/small.kmd'"))
@@ -335,7 +445,7 @@
       (is (= 1 exit-code)))))
 
 (test check-non-readable-file ()
-  (init-files)
+  (init-files "small")
   (let* ((path (str *testdir* "/small")))
     (is (~ "/Hash for .* written/" (keepcl "hash" path)))
     (sh (str "chmod -r '" *testdir* "/small'"))
@@ -345,7 +455,7 @@
       (is (= 2 exit-code)))))
 
 (test check-with-broken-kmd ()
-  (init-files)
+  (init-files "small")
   (let* ((path (str *testdir* "/small")))
     (is (~ "/Hash for .* written/" (keepcl "hash" path)))
     (alter "small.kmd" :overwrite)
@@ -355,7 +465,7 @@
       (is (= 3 exit-code)))))
 
 (test repair-with-broken-kmd ()
-  (init-files)
+  (init-files "small")
   (let* ((path (str *testdir* "/small")))
     (is (~ "/Hash for .* written/" (keepcl "hash" path)))
     (alter "small.kmd" :overwrite)
@@ -367,7 +477,7 @@
       (is (= 1 exit-code)))))
 
 (test repair-with-broken-kmd-and-ok-kmd ()
-  (init-files)
+  (init-files "small")
   (let* ((path (str *testdir* "/small"))
          (sum-before (md5sum path)))
     (is (~ "/Hash for .* written/" (keepcl "hash" path)))
@@ -383,7 +493,7 @@
                    (md5sum path))))))
 
 (test check-with-bad-kmd-option ()
-  (init-files)
+  (init-files "small")
   (let* ((path (str *testdir* "/small")))
     (is (~ "/Hash for .* written/" (keepcl "hash" path)))
     (sh (str "mv '" path ".kmd' '" path "2.kmd'"))
@@ -393,7 +503,7 @@
       (is (= 1 exit-code)))))
 
 (test check-with-kmd-option ()
-  (init-files)
+  (init-files "small")
   (let* ((path (str *testdir* "/small")))
     (is (~ "/Hash for .* written/" (keepcl "hash" path)))
     (sh (str "mv '" path ".kmd' '" path "2.kmd'"))
@@ -403,7 +513,7 @@
       (is (= 0 exit-code)))))
 
 (test check-with-ignore-date-option ()
-  (init-files)
+  (init-files "small")
   (let* ((path (str *testdir* "/small")))
     (is (~ "/Hash for .* written/" (keepcl "hash" path)))
     (sleep 1.1)
@@ -419,7 +529,7 @@
       (is (= 4 exit-code)))))
 
 (test repair-with-ignore-date-option ()
-  (init-files)
+  (init-files "small")
   (let* ((path (str *testdir* "/small"))
          (sum-before (md5sum path)))
     (is (~ "/Hash for .* written/" (keepcl "hash" path)))
@@ -439,7 +549,7 @@
       (is (= 0 exit-code)))))
 
 (test check-with-wrong-date-but-ok-file-fixes-date ()
-  (init-files)
+  (init-files "small")
   (let* ((path (str *testdir* "/small")))
     (is (~ "/Hash for .* written/" (keepcl "hash" path)))
     (sleep 1.1)

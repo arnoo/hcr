@@ -1,5 +1,24 @@
 ;TODO: Handle C-c gracefuly
 ;TODO: Handle unforeseen errors gracefuly
+;
+;   Copyright 2014-2015 Arnaud Bétrémieux <arnaud@btmx.fr>
+;
+;   This file is a part of Keep.
+;
+;   The program in this file is free software: you can redistribute it
+;   and/or modify it under the terms of the GNU General Public License
+;   as published by the Free Software Foundation, either version 3 of
+;   the License, or (at your option) any later version.
+;
+;   This program is distributed in the hope that it will be useful,
+;   but WITHOUT ANY WARRANTY; without even the implied warranty of
+;   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;   GNU General Public License for more details.
+;
+;   You should have received a copy of the GNU General Public License
+;   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+;
+
 (defpackage :keepcl
    (:use     #:cl #:clutch #:keep #:unix-options #:named-readtables)
    (:export  #:main))
@@ -62,7 +81,7 @@ Available commands :
    hash <path>+
    check <path>+
    repair <file> <mirror>+
-   replicate <src>+ <dest>
+   sync <src>+ <dest>
 
 Use keep <command> --help for detailed help on a command"))
   (throw 'exit 9))
@@ -155,43 +174,57 @@ Use keep <command> --help for detailed help on a command"))
 
 (defun list-hashed-files (&rest paths)
   (remove-if-not [probe-file (meta-file-path _)]
-                 (flatten (mapcar [ls _ :recursive t :files-only t] paths))))
+                 (flatten (mapcar [ls _ :recursive t :files-only t] (flatten paths)))))
 
-(defun replicate (src dest &key repair-src)
+(defun sync-single-file (src dest &key repair-src)
   (let ((src-meta)
         (dest-meta))
-    (handler-bind ((meta-open-error (lambda (c) (logmsg 0 "Can't open meta file for " src)   (return-from replicate 1)))
-                   (meta-outdated   (lambda (c) (write-meta-to-file (compute-meta src) meta-path)
+    (handler-bind ((meta-open-error (lambda (c) (logmsg 0 "Can't open meta file for " src)   (return-from sync-single-file 1)))
+                   (meta-outdated   (lambda (c) (logmsg 0 "Metadata updated for " src)
+                                           (write-meta-to-file (compute-meta src) meta-path)
                                            (continue)))
                    (meta-corrupted  (lambda (c) (logmsg 0 "Meta file is corrupted for " src)
                                            (when repair-src
                                               ;TODO)
-                                           (return-from replicate 2)))))
+                                           (return-from sync-single-file 2)))))
       (setf src-meta (get-meta src)))
     (when (file-errors src src-meta)
       (logmsg 0 "Src file is corrupted: " src)
       (when repair-src
           ;TODO
           )
-      (return-from replicate 3))
+      (return-from sync-single-file 3))
     (when (and (probe-file dest)
                (not (file-errors dest src-meta)))
        (logmsg 0 "Replica file up to date: " dest)
-       (return-from replicate 0))
+       (handler-bind ((meta-condition (lambda (c) (logmsg 0 "Replica kmd"
+                                                       (case (type-of c)
+                                                                 ('meta-open-error "missing")
+                                                                 ('meta-outdated   "outdated")
+                                                                 ('meta-corrupted  "corrupted"))
+                                                       ", fixing")
+                                              (copy-file (meta-file-path src) (meta-file-path dest) :keep-date t))))
+         (get-meta dest))
+       (return-from sync-single-file 0))
     (let ((temp-dest (str dest ".kpart")))
       (handler-bind ((meta-open-error (lambda (c) (muffle-warning)))
                      (meta-outdated   (lambda (c) (muffle-warning)))
                      (meta-corrupted  (lambda (c) (logmsg 0 "/!\\ Replica meta file was corrupted: " (meta-file-path dest)) (muffle-warning))))
           (when (and (probe-file dest) (file-errors dest (get-meta dest)))
             (logmsg 0 "/!\\ Replica file was corrupted: " dest)))
+       ;TODO: only copy files if necessary (how: date + size ? just check wether kmd is the same ?)
+       ;TODO: if kmd is not the same, we can't know wether src is not corrupt (might have hashed the file already corrupt) so we need to backup dest
+       ;(let ((backup-path (str src "_" (date-rfc-3339))))
+       ;  (rename-file dest backup-path)
+       ;  (rename-file (meta-file-path dest) (meta-file-path backup-path)))
        (copy-file src temp-dest :keep-date t)
        (if (file-errors temp-dest src-meta)
            (progn (logmsg 0 "Copy failed:" dest)
-                  (return-from replicate 4))
+                  (return-from sync-single-file 4))
            (rename-file temp-dest dest))
       (awith (meta-file-path dest)
         (copy-file (meta-file-path src) it :keep-date t))
-      (handler-bind ((meta-condition (lambda (c) (logmsg 0 "Meta file copy failed for" src) (return-from replicate 5))))
+      (handler-bind ((meta-condition (lambda (c) (logmsg 0 "Meta file copy failed for" src) (return-from sync-single-file 5))))
         (get-meta dest))))
   0)
 
@@ -248,11 +281,11 @@ Use keep <command> --help for detailed help on a command"))
                (block hash-file
                  (when (probe-dir file)
                     (logmsg 0 file " is a directory. Skipping.")
-                    (return-from hash-file nil))
+                    (return-from hash-file 3))
                  (logmsg 1 "Hashing file " file)
                  (when (is-meta-file file)
                     (logmsg 0 file " is a meta file. Skipping.")
-                    (return-from hash-file nil))
+                    (return-from hash-file 3))
                  (let ((meta-path (meta-file-path file)))
                    (handler-bind ((meta-condition (lambda (c) (handler-bind ((file-error (lambda (c) (logmsg 0 "Error accessing " (file-error-pathname c))
                                                                                            (return-from hash-file 2))))
@@ -270,10 +303,10 @@ Use keep <command> --help for detailed help on a command"))
                      (logmsg 0 "Found up-to-date hash for " file " in " meta-path)))))
             free-args)))
 
-(defcmd replicate ()
-  "Copy hashed srcs to destination. Updates destination if files already exist."
+(defcmd sync ()
+  "Copy hashed srcs to destination. Updates destination if files already exist. TODO: explain the details, edge cases..."
   (unless (>= (length free-args) 2)
-    (exit-with-help "replicate"))
+    (exit-with-help "sync"))
   (let* ((srcs {free-args 0 -2})
          (dest {free-args -1})
          (single-file (and (= (length srcs) 1)
@@ -283,21 +316,15 @@ Use keep <command> --help for detailed help on a command"))
                (not (probe-dir dest)))
        (logmsg 0 "When copying multiple files, destination must be a directory")
        (throw 'exit 1))
-    (loop with unhashed = 0
-          with hashed = 0
-          with errors = 0
-          for src in (mapcar 'probe-file srcs)
-          do (loop for file in (ls src :files-only t :recursive t)
-                   when (not (is-meta-file (meta-file-path file)))
-                   do (incf unhashed)
-                   else
-                   do (awith (if single-file
-                                dest
-                                (merge-pathnames {file (length src) -1} (probe-file dest)))
-                             (incf hashed)
-                             (incf errors (replicate file it))))
-          finally (if (zerop errors)
-                      (logmsg 0 "Done, no errors occured")
-                      (logmsg 0 "/!\\ Done, but errors occcured /!\\"))
-                  (logmsg 0 hashed " file(s) copied")
-                  (logmsg 0 unhashed " unhashed file(s) not copied"))))
+    (let* ((statuses (mapcar (lambda (file)
+                                (sync-single-file file
+                                                  (if single-file
+                                                      dest
+                                                      (merge-pathnames {file (length src) -1} (probe-file dest)))))
+                             (list-hashed-files srcs)))
+           (exit-code (reduce #'+ statuses)))
+       (logmsg 0 (if (zerop exit-code)
+                     "Done, no errors occured"
+                     "/!\\ Done, but errors occcured /!\\"))
+       (logmsg 0 (length statuses) " file(s) copied")
+       exit-code)))

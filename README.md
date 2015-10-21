@@ -1,40 +1,34 @@
-Keep is a free (GPL licensed) tool for the safe-keeping of important files against degradation through the slow accumulation of hardware and software errors ("data rot").
+Keep is a free (GPL licensed) tool for checking file integrity and repairing broken files.
+
+Files can degrade through the slow accumulation of hardware and software errors ("data rot").
+Keep creates a digest file that you can store, send and back up along with each of your important files, using your usual tools.
+You can use the digest file to check the validity of copies periodically and avoid propagating errors accross backups.
+Keep checksums your file by chunks and can use the checksums to produce a valid file from two copies broken in different places.
 
 /!\ This is a work in progress and not indented for public consumption yet !
-
 
 Warning: Keep is alpha software, entrust your precious files to it at your own risk.
 Keep is not a replacement for regular backups.
 
-Keep
-  * creates a digest file (with a kmd - Keep MetaData - extension) that it stores next to your files.
-  * can use this digest file to check the integrity of the corresponding file or a copy
-  * repairs broken files from a copy that is either sound or broken in another place (Keep checksums your files by chunks for this purpose)
-  * can synchronize multiple copies of your files, ensuring errors are fixed instead of being propagated as in most backup software
-  
-Example use cases:
-  * You keep your family pictures on your personal NAS. Keep computes checksums for all your photos, and synchronizes additions to a backup server (or an online service). When a picture on either the master or the backup servers is broken, Keep logs the issue, does not transfer the error to the other copy, and repairs the broken file.
-  * You receive your pay slip by email. Attached along with the statement is a kmd file. You keep both in your email, and a copy in your personal computer. Keep can be used to check the validity of either copy and repair it if necessary.
-  
 
 Command line interface
+======================
 
-Compute metadata
+Compute (or update) metadata
     $ keep hash <file> [<file>]*
     $ keep hash family_pictures/**.jpg # this creates one kmd file for each of your pictures
     
 Check the integrity of your files
     $ keep check <file> [<file>]*
-    $ keep check family_pictures
+    $ keep check family_pictures # Will check all hashed files in folder family_pictures and its subfolders
     
-Backup your files other sshfs
-    $ mount -t sshfs /mnt/backup_server
-    $ keep sync --repair-src family_pictures /mnt/backup_server/data  # put this in your crontab to keep the copy up to date. Files on the copy are automatically repaired from the original if broken. --repair-src means that 
-
+Repair a file based on a copy
+    $ keep repair <file> <copy>*
 
 
 Building Keep from source
+=========================
 
-Install ECL (*TODO*)
+Install ECL (There are packages for most Linux distributions, and you can refer to the [manual](https://common-lisp.net/project/ecl/manual/pr01s06.html) to install from source)
 clone the Keep Git repository
 make
