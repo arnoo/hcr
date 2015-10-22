@@ -3,7 +3,7 @@
 ;
 ;   Copyright 2014-2015 Arnaud Bétrémieux <arnaud@btmx.fr>
 ;
-;   This file is a part of Keep.
+;   This file is a part of Hcr.
 ;
 ;   The program in this file is free software: you can redistribute it
 ;   and/or modify it under the terms of the GNU General Public License
@@ -19,11 +19,11 @@
 ;   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ;
 
-(defpackage :keepcl
-   (:use     #:cl #:clutch #:keep #:unix-options #:named-readtables)
+(defpackage :hcr-cli
+   (:use     #:cl #:clutch #:hcr #:unix-options #:named-readtables)
    (:export  #:main))
 
-(in-package :keepcl)
+(in-package :hcr-cli)
 (declaim (optimize debug))
 (in-readtable clutch)
 
@@ -49,7 +49,7 @@
          (exit-code
            (catch 'exit 
              (setf args (if args
-                            (cons "keep" args)
+                            (cons "hcr" args)
                             (argv)))
              (unless {args 1}
                (exit-with-help))
@@ -75,18 +75,18 @@
 (defun exit-with-help (&optional cmd-name)
   (if cmd-name
       (logmsg 0 (cmd-doc {*commands* cmd-name}))
-      (logmsg 0 "Usage :keep <command> <option> <files>
+      (logmsg 0 "Usage : hcr <command> <option> <files>
 
 Available commands :
    hash <path>+
    check <path>+
    repair <file> <mirror>+
 
-Use keep <command> --help for detailed help on a command"))
+Use hcr <command> --help for detailed help on a command"))
   (throw 'exit 9))
 
 (defun meta-file-path (file)
-  (str file ".kmd"))
+  (str file ".hmd"))
 
 (defun opt-param (opts name)
   (awhen (position name opts :test 'string=)
@@ -94,11 +94,11 @@ Use keep <command> --help for detailed help on a command"))
 
 (defun is-meta-file (path)
   (and (probe-file path)
-       (~ "/\\.kmd$/" path)
-       (string= "kmd" (gulp path :limit 3))))
+       (~ "/\\.hmd$/" path)
+       (string= "hmd" (gulp path :limit 3))))
 
-(defun get-meta (file &key kmd ignore-date ignore-checksum explicit-errors)
-  (let ((meta-path (or kmd (meta-file-path file))))
+(defun get-meta (file &key hmd ignore-date ignore-checksum explicit-errors)
+  (let ((meta-path (or hmd (meta-file-path file))))
     (handler-bind ((file-error (lambda (c) (logmsg (if explicit-errors 0 1) "Error opening metadata file: " meta-path)
                                       (error 'meta-open-error))))
       (awith (read-meta-from-file meta-path)
@@ -116,10 +116,10 @@ Use keep <command> --help for detailed help on a command"))
   (merge-pathnames (~s "/^\\///" {src-path (length src-dir) -1})
                    (probe-dir mirror-dir)))
 
-(defun repair-single-file (target mirrors &key target-dir kmd ignore-date)
+(defun repair-single-file (target mirrors &key target-dir hmd ignore-date)
   (let ((valid-meta))
-    (if kmd
-      (ignore-errors (setf valid-meta (get-meta target :kmd kmd :ignore-date ignore-date :explicit-errors t)))
+    (if hmd
+      (ignore-errors (setf valid-meta (get-meta target :hmd hmd :ignore-date ignore-date :explicit-errors t)))
       (loop for copy in (cons target mirrors)
             do (ignore-errors
                  (awith (get-meta copy :ignore-date t)
@@ -150,11 +150,11 @@ Use keep <command> --help for detailed help on a command"))
   (/= (file-write-date file)
       (meta-file-date meta)))
 
-(defun check-single-file (file &key kmd ignore-date)
+(defun check-single-file (file &key hmd ignore-date)
   (handler-bind ((meta-open-error (lambda (c) (logmsg 0 "Can't open meta file for " file)   (return-from check-single-file 1)))
                  (meta-corrupted  (lambda (c) (logmsg 0 "Meta file is corrupted for " file) (return-from check-single-file 3)))
                  (file-error      (lambda (c) (logmsg 0 "Error accessing file " (file-error-pathname c)) (return-from check-single-file 2))))
-    (let* ((meta (get-meta file :kmd kmd :ignore-date t))
+    (let* ((meta (get-meta file :hmd hmd :ignore-date t))
            (errors (file-errors file meta)))
       (cond (errors
               (if (and (not ignore-date) (meta-outdated meta file))
@@ -175,14 +175,14 @@ Use keep <command> --help for detailed help on a command"))
   (remove-if-not [probe-file (meta-file-path _)]
                  (flatten (mapcar [ls _ :recursive t :files-only t] (flatten paths)))))
 
-(defcmd repair ("kmd=" "ignore-date")
-  "keep repair [options] <file> <copy>*
+(defcmd repair ("hmd=" "ignore-date")
+  "hcr repair [options] <file> <copy>*
    
   repairs <file> based on data from copies (<copy>)
 
   options:
-    --kmd=<file.kmd>: use a specific metadata file
-    --ignore-date: ignore the file write date in the kmd file (use only if you know what you are doing)"
+    --hmd=<file.hmd>: use a specific metadata file
+    --ignore-date: ignore the file write date in the hmd file (use only if you know what you are doing)"
   (unless free-args
     (exit-with-help "repair"))
   (d-b (target &rest copies)
@@ -192,22 +192,22 @@ Use keep <command> --help for detailed help on a command"))
                (mapcar (lambda (f) (repair-single-file f
                                                   (mapcar [mirror-path target f _] copies)
                                                   :target-dir target))
-                       (if (in opts "kmd")
+                       (if (in opts "hmd")
                            (ls target :recursive t :files-only t)
                            (list-hashed-files target)))
-               (list (repair-single-file target copies :kmd (opt-param opts "kmd")
+               (list (repair-single-file target copies :hmd (opt-param opts "hmd")
                                                        :ignore-date (in opts "ignore-date"))))
         (logmsg 0 (count 0 it) " file(s) repaired")
         (logmsg 0 (length (remove-if #'zerop it)) " file(s) not repaired")
         (reduce #'+ it))))
     
-(defcmd check ("kmd=" "ignore-date")
+(defcmd check ("hmd=" "ignore-date")
   "TODO: doc for check"
   (unless free-args
     (exit-with-help "check"))
   (exit-unless-paths-exist free-args)
-  (awith (mapcar [check-single-file _ :kmd (opt-param opts "kmd") :ignore-date (in opts "ignore-date")]
-                 (apply (if (in opts "kmd")
+  (awith (mapcar [check-single-file _ :hmd (opt-param opts "hmd") :ignore-date (in opts "ignore-date")]
+                 (apply (if (in opts "hmd")
                             [ls _ :recursive t :files-only t]
                             #'list-hashed-files)
                         free-args))
@@ -215,14 +215,14 @@ Use keep <command> --help for detailed help on a command"))
       (logmsg 0 (length (remove-if #'zerop it)) " file(s) with errors")
       (reduce #'+ it)))
 
-(defcmd hash ("kmd=")
+(defcmd hash ("hmd=")
   "Computes metadata for the files passed in arguments."
   (unless free-args
     (exit-with-help "hash"))
   (exit-unless-paths-exist free-args)
-  (when (and (in opts "kmd")
+  (when (and (in opts "hmd")
              (> (length free-args) 1))
-    (logmsg 0 "Can't hash multiple files into a single kmd."))
+    (logmsg 0 "Can't hash multiple files into a single hmd."))
   (reduce #'+
     (mapcar (lambda (file) 
                (block hash-file

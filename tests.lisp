@@ -1,12 +1,12 @@
-(require 'keep)
+(require 'hcr)
 
-(defpackage :keep-tests
-    (:use     #:cl #:keep #:clutch))
+(defpackage :hcr-tests
+    (:use     #:cl #:hcr #:clutch))
 
-(in-package :keep-tests)
+(in-package :hcr-tests)
 
-(defvar ref-file "/tmp/keep_test.txt")
-(defvar broken-file "/tmp/keep_test_broken.txt")
+(defvar ref-file "/tmp/hcr_test.txt")
+(defvar broken-file "/tmp/hcr_test_broken.txt")
 
 (with-open-file (f ref-file
                    :element-type 'character

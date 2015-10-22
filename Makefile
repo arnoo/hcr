@@ -1,6 +1,6 @@
-keep: build.lisp keep.lisp keepcl.lisp keep.asd keepcl.asd
+hcr: build.lisp hcr.lisp hcr-cli.lisp hcr.asd hcr-cli.asd
 	ecl -load build.lisp
-	mv keepcl keep
+	mv hcr-cli hcr
 
 tests:
 	ecl -load testscl.lisp

@@ -1,5 +1,5 @@
 ;
-;   Copyright 2014 Arnaud Betremieux <arno@arnoo.net>
+;   Copyright 2014-2015 Arnaud Betremieux <arnaud@btmx.fr>
 ;
 ;   This program is free software: you can redistribute it and/or modify
 ;   it under the terms of the GNU General Public License as published by
@@ -17,20 +17,20 @@
 
 (in-package :cl-user)
 
-(defpackage :keepcl-asd
+(defpackage :hcr-cli-asd
   (:use :cl :asdf))
 
-(in-package :keepcl-asd)
+(in-package :hcr-cli-asd)
 
-(defsystem :keepcl
-  :name "keepcl"
+(defsystem :hcr-cli
+  :name "hcr-cli"
   :maintainer "Arnaud Betremieux"
   :licence "GPL"
   :serial t
   :version 0.1
-  :components ((:file "keepcl"))
+  :components ((:file "hcr-cli"))
   :depends-on (:anaphora
 	             :clutch
                :ironclad
                :named-readtables
-	             :keep))
+	             :hcr))

@@ -1,7 +1,7 @@
 ;
 ;   Copyright 2014-2015 Arnaud Bétrémieux <arnaud@btmx.fr>
 ;
-;   This file is a part of Keep.
+;   This file is a part of Hcr.
 ;
 ;   The program in this file is free software: you can redistribute it
 ;   and/or modify it under the terms of the GNU General Public License
@@ -17,12 +17,12 @@
 ;   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ;
 
-(defpackage :keep
+(defpackage :hcr
     (:use     #:cl #:clutch #:cl-store #:named-readtables)
     (:export  #:compute-meta #:meta-error #:file-errors #:repair-file #:copy-file
       	      #:read-meta-from-file #:write-meta-to-file #:logmsg #:*log-level* #:*output*))
 
-(in-package :keep)
+(in-package :hcr)
 (declaim (optimize debug))
 (in-readtable clutch)
 
@@ -87,7 +87,7 @@
 
 (defun write-meta-to-file (meta file)
   (ungulp file
-          (str "kmd1"
+          (str "hmd1"
                #\Newline
                (ut-to-unix (meta-meta-date meta))
                #\Newline
@@ -182,8 +182,8 @@
 
 (defun copy-file (file dest &key keep-date)
   (let ((seq (make-array 4096 :element-type '(unsigned-byte 8))))
-    (keep::with-open-binfile (f file)
-      (keep::with-open-binfile (fdest dest :direction :output)
+    (with-open-binfile (f file)
+      (with-open-binfile (fdest dest :direction :output)
         (loop for pos = (read-sequence seq f)
               until (= pos 0)
               do (write-sequence seq fdest :end pos)))))
