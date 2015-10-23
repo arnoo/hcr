@@ -5,7 +5,7 @@ Hcr creates a digest file that you can store, send and back up along with each o
 You can use the digest file to check the validity of copies periodically and avoid propagating errors accross backups.
 Hcr checksums your file by chunks and can use the checksums to produce a valid file from two copies broken in different places.
 
-![Hcr chunk hashing diagram](https://cloud.githubusercontent.com/assets/185428/7026802/380bbd3a-dd4c-11e4-8bcf-a6ee2cbe30de.png)
+![Hcr chunk hashing diagram](https://cloud.githubusercontent.com/assets/185428/10698567/ed29af72-79b1-11e5-8f7f-5368c601e5c1.png)
 
 /!\ This is a work in progress and not indented for public consumption yet !
 
