@@ -1,4 +1,7 @@
-HCR (Hash, Check, Repair) is a free (GPL licensed) tool for checking file integrity and repairing broken files.
+Hcr
+===
+
+Hcr (Hash, Check, Repair) is a free (GPL licensed) tool for checking file integrity and repairing broken files.
 
 Files can degrade through the slow accumulation of hardware and software errors ("data rot").
 Hcr creates a digest file that you can store, send and back up along with each of your important files, using your usual tools.
@@ -17,14 +20,17 @@ Command line interface
 ======================
 
 Compute (or update) metadata
+
     $ hcr hash <file> [<file>]*
     $ hcr hash family_pictures/**.jpg # this creates one kmd file for each of your pictures
     
 Check the integrity of your files
+
     $ hcr check <file> [<file>]*
     $ hcr check family_pictures # Will check all hashed files in folder family_pictures and its subfolders
     
 Repair a file based on a copy
+
     $ hcr repair <file> <copy>*
 
 
