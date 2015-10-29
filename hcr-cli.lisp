@@ -59,18 +59,33 @@
                (unless cmd
                  (logmsg 0 "Unknown command : " cmd-name)
                  (exit-with-help))
-               (m-v-b (args opts free-args)
-                      (getopt {args 2 -1}
-                              (str {cmd-opts t} "v")
-                              {cmd-opts nil})
+               (m-v-b (args opts free-args invalid-opts)
+                      (my-getopt {args 2 -1}
+                                 (str {cmd-opts t} "v")
+                                 {cmd-opts nil})
                   (setf *log-level* (count "v" opts :test #'string=))
-                  (when (in opts "help")
+                  (when invalid-opts
+                    (logmsg 0 "Invalid option(s) : " (join ", " invalid-opts)))
+                  (when (or invalid-opts (in opts "help"))
                     (exit-with-help cmd-name))
                   ;TODO: exit with help if invalid opts
                   (funcall (cmd-fn cmd) opts free-args))))))
       (if from-shell
           (exit exit-code)
           (values (get-output-stream-string *output*) exit-code))))
+  
+(defun my-getopt (cli-options shortopts longopts)
+  (values-list
+    (append (multiple-value-list (getopt cli-options shortopts longopts))
+            nil
+ ;           (loop for opt in cli-options
+ ;                 until (string= opt "--")
+ ;                 when (and (char= {opt 0} "-")
+ ;                           (if (= (length opt) 2)
+ ;                               (not (in shortopts {opt 1}))
+ ;                               (not (in logopts 
+ ;                 collect ))))
+)))
 
 (defun exit-with-help (&optional cmd-name)
   (if cmd-name
@@ -127,18 +142,20 @@ Use hcr <command> --help for detailed help on a command"))
                             (not ignore-date))
                      (logmsg 1 "Write date in metadata does not match file date: " copy)
                      (setf valid-meta it))))))
-    (if valid-meta
-        (progn
-          (handler-bind ((file-error (lambda (c) (logmsg 0 "Error accessing file: " (file-error-pathname c))
-                                            (return-from repair-single-file 2)
-                                            (error 'meta-open-error))))
-            (apply #'repair-file
-                  (append (list target valid-meta mirrors))))
-          (logmsg 0 "File repaired: " target)
-          (return-from repair-single-file 0))
-        (progn
-          (logmsg 0 "/!\\ can't repair " target ": no valid and up-to-date metadata found")
-          (return-from repair-single-file 1)))))
+    (unless valid-meta
+      (logmsg 0 "/!\\ can't repair " target ": no valid and up-to-date metadata found")
+      (return-from repair-single-file 1))
+    (handler-bind ((file-error (lambda (c) (logmsg 0 "Error accessing file: " (file-error-pathname c))
+                                      (return-from repair-single-file 2)
+                                      (error 'meta-open-error))))
+      (let ((result (apply #'repair-file
+                          (append (list target valid-meta mirrors)))))
+        (logmsg 0
+                (str (cond ((null result) "File is not broken")
+                           ((zerop result) "File repaired")
+                           (t "File could not be repaired"))
+                     " : " target))
+        (or result 0)))))
 
 (defun exit-unless-paths-exist (&rest paths)
   (loop for path in (flatten paths)
@@ -160,7 +177,7 @@ Use hcr <command> --help for detailed help on a command"))
               (if (and (not ignore-date) (meta-outdated meta file))
                 (progn (logmsg 0 "/!\\ Write date in metadata does not match file date:" file)
                        2)
-                (progn (logmsg 0 "/!\\ File " file " has errors in " (meta-chunk-size meta) "B chunks " (join "," (mapcar 'str errors)))
+                (progn (logmsg 0 "/!\\ File " file " has errors in " (meta-chunk-size meta) "B chunk(s) " (join "," (mapcar 'str errors)))
                        4)))
             (t
               (when (and (not ignore-date) (meta-outdated meta file))
@@ -182,7 +199,7 @@ Use hcr <command> --help for detailed help on a command"))
 
   options:
     --hmd=<file.hmd>: use a specific metadata file
-    --ignore-date: ignore the file write date in the hmd file (use only if you know what you are doing)"
+    --ignore-date: ignore the file write date, assume an unmodified file (use only if you know what you are doing)"
   (unless free-args
     (exit-with-help "repair"))
   (d-b (target &rest copies)
@@ -202,7 +219,13 @@ Use hcr <command> --help for detailed help on a command"))
         (reduce #'+ it))))
     
 (defcmd check ("hmd=" "ignore-date")
-  "TODO: doc for check"
+  "hcr check [options] <file>*
+   
+  checks <file>* for errors
+
+  options:
+    --hmd=<file.hmd>: use a specific metadata file
+    --ignore-date: ignore the file write date, assume an unmodified file (use only if you know what you are doing)"
   (unless free-args
     (exit-with-help "check"))
   (exit-unless-paths-exist free-args)

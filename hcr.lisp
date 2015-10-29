@@ -19,7 +19,7 @@
 
 (defpackage :hcr
     (:use     #:cl #:clutch #:cl-store #:named-readtables)
-    (:export  #:compute-meta #:meta-error #:file-errors #:repair-file #:copy-file
+    (:export  #:compute-meta #:meta-error #:file-errors #:repair-file
       	      #:read-meta-from-file #:write-meta-to-file #:logmsg #:*log-level* #:*output*))
 
 (in-package :hcr)
@@ -132,42 +132,44 @@
 
 (defun write-chunk-from-copies (dest chunk-index meta copies)
   (logmsg 1 "Trying to repair chunk " chunk-index)
-  (with-open-binfile (dest-handle dest :if-exists :overwrite
-                                       :direction :output
-                                       :if-does-not-exist :error)
-    (file-position dest-handle (* (meta-chunk-size meta)
-                        chunk-index))
-    (let ((seq (make-array (meta-chunk-size meta)
-                           :element-type '(unsigned-byte 8))))
-      (loop for copy in copies
-            do (logmsg 1 "Trying copy " copy)
-               (with-open-binfile (c copy)
-                    (file-position c (* (meta-chunk-size meta)
-                                        chunk-index))
-                    (let ((pos (read-sequence seq c)))
-                        (if (string= {{(meta-hash-tree meta) 0} chunk-index}
-                                     (digest-seq seq pos))
-                            (progn
-                                (write-sequence seq dest-handle :end pos)
-                                (logmsg 1 "Chunk repair successful")
-                                (return-from write-chunk-from-copies 0))
-                            (logmsg 1 "Copy chunk is also broken")))))
-      (return-from write-chunk-from-copies 1))))
+  (let ((seq (make-array (meta-chunk-size meta)
+                         :element-type '(unsigned-byte 8))))
+    (loop for copy in copies
+          do (logmsg 1 "Trying copy " copy)
+             (let* ((max (when (= chunk-index (- (length {(meta-hash-tree meta) 0}) 1))
+                            (awith (rem (meta-file-size meta) (meta-chunk-size meta))
+                              (if (zerop it) (meta-chunk-size meta) it))))
+                    (pos (with-open-binfile (c copy)
+                           (file-position c (* (meta-chunk-size meta)
+                                               chunk-index))
+                           (read-sequence seq c :end max))))
+                 (if (string= {{(meta-hash-tree meta) 0} chunk-index}
+                              (digest-seq seq pos))
+                    (progn
+                      (with-open-binfile (dest-handle dest :if-exists :overwrite
+                                                           :direction :output
+                                                           :if-does-not-exist :error)
+                        (file-position dest-handle (* (meta-chunk-size meta)
+                                                      chunk-index))
+                        (write-sequence seq dest-handle :end pos))
+                      (logmsg 1 "Chunk repair successful")
+                      (return-from write-chunk-from-copies 0))
+                    (logmsg 1 "Copy chunk is also broken")))))
+  1)
 
 (defun fix-file-length (file meta)
-  (let ((needs-fix))
+  (when
     (with-open-binfile (f file :if-exists :overwrite
                                  :direction :output
                                  :if-does-not-exist :error)
-        (when (> (file-length f) (meta-file-size meta))
-          (setf needs-fix t)))
-    (when needs-fix
-      (file-truncate file (meta-file-size meta)))))
+        (> (file-length f) (meta-file-size meta)))
+    (logmsg 1 "Fixing file length")
+    (file-truncate file (meta-file-size meta))))
 
 (defun repair-file (file meta copies)
   (let ((errors (file-errors file meta)))
     (unless errors (return-from repair-file nil))
-    (logmsg 1 "Errors in " file " : chunks " (join ", " (mapcar #'str errors)))
+    (logmsg 1 "Error(s) in " file " : chunk(s) " (join ", " (mapcar #'str errors)))
     (prog1
       (reduce #'+
               (mapcar (lambda (err) (write-chunk-from-copies file err meta copies))
@@ -179,17 +181,6 @@
   (loop for chunk-index from 0 below (length (car (meta-hash-tree meta)))
         do (write-chunk-from-copies new-filename chunk-index meta copies))
   (file-set-write-date file (meta-file-date meta)))
-
-(defun copy-file (file dest &key keep-date)
-  (let ((seq (make-array 4096 :element-type '(unsigned-byte 8))))
-    (with-open-binfile (f file)
-      (with-open-binfile (fdest dest :direction :output)
-        (loop for pos = (read-sequence seq f)
-              until (= pos 0)
-              do (write-sequence seq fdest :end pos)))))
-    ; TODO: set file permissions to same as original (how ?)
-    (when keep-date
-      (file-set-write-date dest (file-write-date file))))
 
 (defun file-truncate (file length) ;TODO: use cffi + make work on windows -> see truncate in osicat ?
   (sh (str "truncate -s" length " '" file "'")))

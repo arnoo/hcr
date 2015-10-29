@@ -79,16 +79,25 @@
   (let* ((path (str *testdir* "/" file))
          (wdate (file-write-date path)))
     (case mode
-      ((:append :overwrite) (with-open-file (f path
-                       :if-exists :overwrite
-                       :direction :output
-                       :element-type 'character)
-               (case mode
-                 (:append (file-position f (file-length f))
-                          (write-char #\x f))
-                 (:overwrite (file-position f (* (floor (/ (file-length f) 10))
-                                                 overwrite-chunk))
-                             (write-char #\a f)))))
+      ((:append :overwrite)
+         (hcr::with-open-binfile (f path
+                                    :if-exists :overwrite
+                                    :direction :io)
+            (case mode
+              (:append (file-position f (file-length f))
+                       (write-byte 101 f))
+              (:overwrite (let ((pos (* (floor (/ (file-length f) 10))
+                                        overwrite-chunk)))
+                            (file-position f pos)
+                            (awith (if (> (file-length f) pos)
+                                     (read-byte f)
+                                     0)
+                              (file-position f pos)
+                              (write-byte
+                                 (if (= 255 it)
+                                     0
+                                     (+ 1 it))
+                                 f)))))))
       (:shorten (hcr::file-truncate path (- (with-open-file (f path) (file-length f)) 1))))
       (hcr::file-set-write-date path wdate)))
 
@@ -177,7 +186,7 @@
                   (md5sum path)))
     (m-v-b (output exit-code)
            (hcr-cli "repair" path path)
-      (is (= exit-code 1)))  ;TODO: check text output
+      (is (= 1 exit-code)))  ;TODO: check text output
     (is (string/= sum-before
                       (md5sum path)))))
 
@@ -190,8 +199,9 @@
     (is (string/= sum-before
                       (md5sum path)))
     (m-v-b (output exit-code)
-           (hcr-cli "repair" path path) ;TODO: check text output, should not need arg twice
-      (is (= exit-code 0)))
+           (hcr-cli "repair" path path) ;TODO: should not need arg twice
+      (is (~ "/File repaired :/" output))
+      (is (= 0 exit-code)))
     (is (string= sum-before
                      (md5sum path)))))
 
@@ -251,7 +261,7 @@
       (m-v-b (output exit-code)
              (hcr-cli "hash" path)
          (is (= (length (~ "/Updated hash .* original corrupted/" output))))
-         (is (= exit-code 0))
+         (is (= 0 exit-code))
          (is (string= sum-before
                       (md5sum hmd-path)))))))
 
@@ -426,9 +436,8 @@
   (init-files "small")
   (let* ((path (str *testdir* "/small")))
     (is (~ "/Hash for .* written/" (hcr-cli "hash" path)))
-    (sleep 1.1)
     (alter "small" :overwrite) ;if the date is wrong but the file ok the date would be fixed automatically, so we have to break the file...
-    (hcr::file-set-write-date path (ut))
+    (hcr::file-set-write-date path (+ (ut) 1))
     (m-v-b (output exit-code)
            (hcr-cli "check" path)
       (is (~ "/Write date in metadata does not match file date/" output))
@@ -443,10 +452,9 @@
   (let* ((path (str *testdir* "/small"))
          (sum-before (md5sum path)))
     (is (~ "/Hash for .* written/" (hcr-cli "hash" path)))
-    (sleep 1.1)
-    (alter "small" :overwrite) ;if the date is wrong but the file ok the date would be fixed automatically, so we have to break the file...
-    (hcr::file-set-write-date path (ut))
     (sh (str "cp '" path "' '" path ".bak'"))
+    (alter "small" :overwrite)
+    (hcr::file-set-write-date path (+ (ut) 1))
     (is (string/= sum-before
                   (md5sum path)))
     (m-v-b (output exit-code)
@@ -462,8 +470,7 @@
   (init-files "small")
   (let* ((path (str *testdir* "/small")))
     (is (~ "/Hash for .* written/" (hcr-cli "hash" path)))
-    (sleep 1.1)
-    (hcr::file-set-write-date path (ut))
+    (hcr::file-set-write-date path (+ (ut) 1))
     (m-v-b (output exit-code)
            (hcr-cli "check" path)
       (is (~ "/Write date for file was incorrect in metadata. Fixed/" output))
@@ -483,6 +490,3 @@
     (is (= 1 (length (~ "/is a directory/" output))))
     (is (= 1 (length (~ "/Hash for .* written/" output))))
     (is (probe-file (str *testdir* "/small.hmd")))))
-
-(run! 'hcr)
-(exit)
