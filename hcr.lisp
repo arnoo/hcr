@@ -135,26 +135,30 @@
   (let ((seq (make-array (meta-chunk-size meta)
                          :element-type '(unsigned-byte 8))))
     (loop for copy in copies
-          do (logmsg 1 "Trying copy " copy)
-             (let* ((max (when (= chunk-index (- (length {(meta-hash-tree meta) 0}) 1))
-                            (awith (rem (meta-file-size meta) (meta-chunk-size meta))
-                              (if (zerop it) (meta-chunk-size meta) it))))
-                    (pos (with-open-binfile (c copy)
-                           (file-position c (* (meta-chunk-size meta)
-                                               chunk-index))
-                           (read-sequence seq c :end max))))
-                 (if (string= {{(meta-hash-tree meta) 0} chunk-index}
-                              (digest-seq seq pos))
-                    (progn
-                      (with-open-binfile (dest-handle dest :if-exists :overwrite
-                                                           :direction :output
-                                                           :if-does-not-exist :error)
-                        (file-position dest-handle (* (meta-chunk-size meta)
-                                                      chunk-index))
-                        (write-sequence seq dest-handle :end pos))
-                      (logmsg 1 "Chunk repair successful")
-                      (return-from write-chunk-from-copies 0))
-                    (logmsg 1 "Copy chunk is also broken")))))
+          do (block try-copy
+                (logmsg 1 "Trying copy " copy)
+                (let* ((max (when (= chunk-index (- (length {(meta-hash-tree meta) 0}) 1))
+                               (awith (rem (meta-file-size meta) (meta-chunk-size meta))
+                                 (if (zerop it) (meta-chunk-size meta) it))))
+                       (pos (handler-bind
+                               ((file-error (lambda (c) (logmsg 1 "Error accessing file " (file-error-pathname c)) (return-from try-copy))))
+                               (with-open-binfile (c copy)
+                                 (file-position c (* (meta-chunk-size meta)
+                                                     chunk-index))
+                                 (read-sequence seq c :end max)))))
+                    (if (string= {{(meta-hash-tree meta) 0} chunk-index}
+                                 (digest-seq seq pos))
+                       (handler-bind
+                         ((file-error (lambda (c) (logmsg 0 "Error accessing file " (file-error-pathname c)) (return-from write-chunk-from-copies 2))))
+                         (with-open-binfile (dest-handle dest :if-exists :overwrite
+                                                              :direction :output
+                                                              :if-does-not-exist :error)
+                           (file-position dest-handle (* (meta-chunk-size meta)
+                                                         chunk-index))
+                           (write-sequence seq dest-handle :end pos))
+                         (logmsg 1 "Chunk repair successful")
+                         (return-from write-chunk-from-copies 0))
+                       (logmsg 1 "Copy chunk is also broken"))))))
   1)
 
 (defun fix-file-length (file meta)

@@ -78,6 +78,7 @@
   (values-list
     (append (multiple-value-list (getopt cli-options shortopts longopts))
             nil
+ ;TODO
  ;           (loop for opt in cli-options
  ;                 until (string= opt "--")
  ;                 when (and (char= {opt 0} "-")
