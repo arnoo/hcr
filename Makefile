@@ -11,4 +11,6 @@ tests:
 sbtests:
 	sbcl --load testsrun.cl
 
+install: hcr
+	/usr/bin/install -c -m 0755 hcr /usr/bin/hcr
 
