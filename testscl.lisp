@@ -135,6 +135,12 @@
 (def-suite hcr)
 (in-suite hcr)
 
+(test unknown-command
+  (m-v-b (output exit-code)
+         (hcr-cli "asdf")
+    (is (~ "/Unknown command/" output))
+    (is (= 9 exit-code))))
+
 (test hash-file
   (init-files)
   (mapcar 'test-hash-single *all-root*))
@@ -323,12 +329,6 @@
       (is (equal (mapcar [md5sum (str *testdir* ".bak/" _)] *all*)
                   md5sums)))
     (rm (str *testdir* ".bak") :recursive t)))
-
-(test unknown-command
-  (m-v-b (output exit-code)
-         (hcr-cli "asdf")
-    (is (~ "/Unknown command/" output))
-    (is (= 9 exit-code))))
 
 (test missing-files
   (m-v-b (output exit-code)
@@ -568,12 +568,14 @@
   (init-files)
   (m-v-b (output exit-code)
          (hcr-cli "hash" *testdir*)
-    (is (~ "/is a directory/" output))))
+    (is (= (length (~ "/Hash for .* written/g" output))
+           (length *all*)))
+    (is (probe-file (str *testdir* "/small.hmd")))))
 
 (test hash-dir-and-file ()
   (init-files)
   (m-v-b (output exit-code)
          (hcr-cli "hash" *testdir* (str *testdir* "/small"))
-    (is (= 1 (length (~ "/is a directory/" output))))
-    (is (= 1 (length (~ "/Hash for .* written/" output))))
+    (is (= (length (~ "/Hash for .* written/g" output))
+           (length *all*)))
     (is (probe-file (str *testdir* "/small.hmd")))))

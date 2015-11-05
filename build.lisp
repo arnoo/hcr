@@ -27,4 +27,4 @@
 
 (asdf:make-build :hcr-cli :type :program :prologue-code '(setf *compile-verbose* nil) :epilogue-code '(hcr-cli::main) :move-here "./")
 
-(exit)
+(clutch:exit)

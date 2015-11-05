@@ -1,3 +1,4 @@
+(declaim (optimize debug))
 ;TODO: Handle C-c gracefuly -> disable debugger
 ;TODO: Handle unforeseen errors gracefuly
 ;
@@ -51,7 +52,7 @@
              (setf args (if args
                             (cons "hcr" args)
                             (argv)))
-             (unless {args 1}
+             (unless (cdr args)
                (exit-with-help))
              (let* ((cmd-name (lc {args 1}))
                     (cmd {*commands* cmd-name})
@@ -101,6 +102,22 @@ Available commands :
 Use hcr <command> --help for detailed help on a command"))
   (throw 'exit 9))
 
+(defmacro with-files ((files &key hashed-only) &body body)
+  `(let* ((result (mapcar
+                     (lambda (file)
+                        (block with-file-iteration
+                               ,@body))
+                     (apply (if ,hashed-only
+                                #'list-hashed-files
+                                [ls _ :recursive t :files-only t])
+                            (if (atom ,files) (list ,files) ,files))))
+          (ok (count 0 result))
+          (ko (- (length result) ok)))
+     (values
+        (if (some #'plusp result) 1 0)
+        ok
+        ko)))
+
 (defun meta-file-path (file)
   (str file ".hmd"))
 
@@ -132,7 +149,7 @@ Use hcr <command> --help for detailed help on a command"))
   (merge-pathnames (~s "/^\\///" {src-path (length src-dir) -1})
                    (probe-dir mirror-dir)))
 
-(defun repair-single-file (target mirrors &key target-dir hmd ignore-date)
+(defun repair-single-file (target mirrors &key hmd ignore-date)
   (let ((valid-meta))
     (if hmd
       (ignore-errors (setf valid-meta (get-meta target :hmd hmd :ignore-date ignore-date :explicit-errors t)))
@@ -197,6 +214,54 @@ Use hcr <command> --help for detailed help on a command"))
   (remove-if-not [probe-file (meta-file-path _)]
                  (flatten (mapcar [ls _ :recursive t :files-only t] (flatten paths)))))
 
+(defcmd hash ("hmd=")
+  "Computes metadata for the files passed in arguments."
+  (unless free-args
+    (exit-with-help "hash"))
+  (exit-unless-paths-exist free-args)
+  (when (and (in opts "hmd")
+             (> (length free-args) 1))
+    (logmsg 0 "Can't hash multiple files into a single hmd."))
+  (with-files (free-args)
+    (logmsg 1 "Hashing file " file)
+    (when (is-meta-file file)
+       (logmsg 0 file " is a meta file. Skipping.")
+       (return-from with-file-iteration 3))
+    (let ((meta-path (meta-file-path file)))
+      (handler-bind ((meta-condition (lambda (c) (handler-bind ((file-error (lambda (c) (logmsg 0 "Error accessing " (file-error-pathname c))
+                                                                              (return-from with-file-iteration 2))))
+                                                (write-meta-to-file (compute-meta file) meta-path))
+                                            (case (type-of c)
+                                               ('meta-open-error (logmsg 0 "Hash for " file " written to " meta-path))
+                                               ('meta-outdated   (logmsg 0 "Updated hash for " file " written to " meta-path))
+                                               ('meta-corrupted  (logmsg 0 "Updated hash /!\\ original corrupted /!\\ for " file " written to " meta-path))
+                                               ('file-error      (logmsg 0 "Error accessing " (file-error-pathname c))
+                                                                 (return-from with-file-iteration 1))
+                                               (otherwise        (logmsg 0 "Error hashing " file ":" )
+                                                                 (return-from with-file-iteration 1)))
+                                            (return-from with-file-iteration 0))))
+        (get-meta file)
+        (logmsg 0 "Found up-to-date hash for " file " in " meta-path)
+        0))))
+
+(defcmd check ("hmd=" "ignore-date")
+  "hcr check [options] <file>*
+   
+  checks <file>* for errors
+
+  options:
+    --hmd=<file.hmd>: use a specific metadata file
+    --ignore-date: ignore the file write date, assume an unmodified file (use only if you know what you are doing)"
+  (unless free-args
+    (exit-with-help "check"))
+  (exit-unless-paths-exist free-args)
+  (m-v-b (result ok ko)
+         (with-files (free-args :hashed-only (not (in opts "hmd")))
+            (check-single-file file :hmd (opt-param opts "hmd") :ignore-date (in opts "ignore-date")))
+      (logmsg 0 ok " file(s) OK")
+      (logmsg 0 ko " file(s) with errors")
+      result))
+
 (defcmd repair ("hmd=" "ignore-date")
   "hcr repair [options] <file> <copy>*
    
@@ -210,72 +275,13 @@ Use hcr <command> --help for detailed help on a command"))
   (d-b (target &rest copies)
        free-args
     (exit-unless-paths-exist target copies)
-    (awith (if (probe-dir target)
-               (mapcar (lambda (f) (repair-single-file f
-                                                  (mapcar [mirror-path target f _] copies)
-                                                  :target-dir target))
-                       (if (in opts "hmd")
-                           (ls target :recursive t :files-only t)
-                           (list-hashed-files target)))
-               (list (repair-single-file target copies :hmd (opt-param opts "hmd")
-                                                       :ignore-date (in opts "ignore-date"))))
-        (logmsg 0 (count 0 it) " file(s) repaired")
-        (logmsg 0 (length (remove-if #'zerop it)) " file(s) not repaired")
-        (if (some #'plusp it) 1 0))))
-    
-(defcmd check ("hmd=" "ignore-date")
-  "hcr check [options] <file>*
-   
-  checks <file>* for errors
-
-  options:
-    --hmd=<file.hmd>: use a specific metadata file
-    --ignore-date: ignore the file write date, assume an unmodified file (use only if you know what you are doing)"
-  (unless free-args
-    (exit-with-help "check"))
-  (exit-unless-paths-exist free-args)
-  (awith (mapcar [check-single-file _ :hmd (opt-param opts "hmd") :ignore-date (in opts "ignore-date")]
-                 (apply (if (in opts "hmd")
-                            [ls _ :recursive t :files-only t]
-                            #'list-hashed-files)
-                        free-args))
-      (logmsg 0 (count 0 it) " file(s) OK")
-      (logmsg 0 (length (remove-if #'zerop it)) " file(s) with errors")
-      (if (some #'plusp it) 1 0)))
-
-(defcmd hash ("hmd=")
-  "Computes metadata for the files passed in arguments."
-  (unless free-args
-    (exit-with-help "hash"))
-  (exit-unless-paths-exist free-args)
-  (when (and (in opts "hmd")
-             (> (length free-args) 1))
-    (logmsg 0 "Can't hash multiple files into a single hmd."))
-  (awith
-    (mapcar (lambda (file) 
-               (block hash-file
-                 (when (probe-dir file)
-                    (logmsg 0 file " is a directory. Skipping.")
-                    (return-from hash-file 3))
-                 (logmsg 1 "Hashing file " file)
-                 (when (is-meta-file file)
-                    (logmsg 0 file " is a meta file. Skipping.")
-                    (return-from hash-file 3))
-                 (let ((meta-path (meta-file-path file)))
-                   (handler-bind ((meta-condition (lambda (c) (handler-bind ((file-error (lambda (c) (logmsg 0 "Error accessing " (file-error-pathname c))
-                                                                                           (return-from hash-file 2))))
-                                                             (write-meta-to-file (compute-meta file) meta-path))
-                                                         (case (type-of c)
-                                                            ('meta-open-error (logmsg 0 "Hash for " file " written to " meta-path))
-                                                            ('meta-outdated   (logmsg 0 "Updated hash for " file " written to " meta-path))
-                                                            ('meta-corrupted  (logmsg 0 "Updated hash /!\\ original corrupted /!\\ for " file " written to " meta-path))
-                                                            ('file-error      (logmsg 0 "Error accessing " (file-error-pathname c))
-                                                                              (return-from hash-file 1))
-                                                            (otherwise        (logmsg 0 "Error hashing " file ":" )
-                                                                              (return-from hash-file 1)))
-                                                         (return-from hash-file 0))))
-                     (get-meta file)
-                     (logmsg 0 "Found up-to-date hash for " file " in " meta-path)))
-                  0))
-            free-args)
-    (if (some #'plusp it) 1 0)))
+    (let ((is-dir (probe-dir target)))
+      (m-v-b (result ok ko)
+             (with-files (target :hashed-only (not (in opts "hmd")))
+                (repair-single-file file
+                                    (if is-dir (mapcar [mirror-path target file _] copies) copies)
+                                    :ignore-date (and (not is-dir) (in opts "ignore-date"))
+                                    :hmd (and (not is-dir) (opt-param opts "hmd"))))
+         (logmsg 0 ok " file(s) repaired")
+         (logmsg 0 ko " file(s) not repaired")
+         result))))

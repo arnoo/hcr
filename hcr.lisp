@@ -104,16 +104,16 @@
           :if-exists :overwrite))
 
 (defun read-meta-from-file (file)
-  (let ((data (remove ""
-                      (split (str #\Newline) (gulp file))
-                      :test 'string=)))
+  (let ((data (split (str #\Newline)
+                     (string-right-trim (str #\Newline)
+                                        (gulp file)))))
     (make-meta
       :version (read-from-string {{data 0} 3 -1})
       :meta-date (unix-to-ut (read-from-string {data 1}))
       :file-date (unix-to-ut (read-from-string {data 2}))
       :file-size (read-from-string {data 3})
       :chunk-size (read-from-string {data 4})
-      :hash-tree (mapcar [split (str #\;) _] {data 5 -2})
+      :hash-tree (mapcar [remove "" (split (str #\;) _) :test 'string=] {data 5 -2})
       :meta-hash {data -1})))
 
 (defun meta-error (meta)
