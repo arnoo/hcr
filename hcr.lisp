@@ -23,7 +23,7 @@
       	      #:read-meta-from-file #:write-meta-to-file #:logmsg #:*log-level* #:*output*))
 
 (in-package :hcr)
-(declaim (optimize debug))
+;(declaim (optimize debug))
 (in-readtable clutch)
 
 (defvar *log-level* 1)
