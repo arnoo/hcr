@@ -53,17 +53,18 @@
         by [nthcdr 10 _]
         collect (sha256 (join "" (trim tail 10)))))
 
-(defun compute-hash-tree (file &optional chunk-size)
-  (loop with hashes = (list (compute-hashes file chunk-size))
+(defun compute-hash-tree (file &key (chunk-size 4096))
+  (loop with hashes = (list (compute-hashes file :chunk-size chunk-size))
         while (> (length {hashes -1}) 1)
         do (pushend (hash-hashes {hashes -1}) hashes)
         finally (return hashes)))
 
-(defun compute-hashes (file &optional (chunk-size 4096))
+(defun compute-hashes (file &key (chunk-size 4096) truncate)
   (with-open-binfile (f file)
     (loop with seq = (make-array chunk-size :element-type '(unsigned-byte 8))
-          for pos = (read-sequence seq f)
+          for pos = (read-sequence seq f :end (and truncate (min chunk-size (- truncate total-read))))
           until (= pos 0)
+          sum pos into total-read
           collect (digest-seq seq pos))))
 
 (defun compute-meta-hash (meta)
@@ -73,14 +74,14 @@
                 (meta-chunk-size meta) "#" 
                 {(meta-hash-tree meta) -1})))
 
-(defun compute-meta (file &optional (chunk-size 4096))
+(defun compute-meta (file &key (chunk-size 4096))
   (awith
     (make-meta
         :meta-date (ut)
        	:file-date (file-write-date file)
        	:file-size (filesize file)
        	:chunk-size chunk-size
-       	:hash-tree (compute-hash-tree file chunk-size))
+       	:hash-tree (compute-hash-tree file :chunk-size chunk-size))
     (setf (meta-meta-hash it)
           (compute-meta-hash it))
     it))
@@ -120,15 +121,19 @@
             (compute-meta-hash meta)))
 
 (defun file-errors (file meta)
-  (let ((file-hashes (compute-hashes file (meta-chunk-size meta)))
-        (correct-hashes (car (meta-hash-tree meta))))
-    (append (loop for i from 0
-                  below (max (length correct-hashes) (length file-hashes))
-	                when (or (> i (- (length file-hashes) 1))
-                           (> i (- (length correct-hashes) 1))
-                           (string/= {file-hashes i}
-                                     {correct-hashes i}))
-                  collect i))))
+  (let* ((file-hashes (compute-hashes file :chunk-size (meta-chunk-size meta) :truncate (meta-file-size meta)))
+         (correct-hashes (car (meta-hash-tree meta)))
+         (broken-chunks (loop for i from 0
+                              below (max (length correct-hashes) (length file-hashes))
+	                            when (or (> i (- (length file-hashes) 1))
+                                       (> i (- (length correct-hashes) 1))
+                                       (string/= {file-hashes i}
+                                                 {correct-hashes i}))
+                              collect i))
+         (bytes-appended (with-open-binfile (f file :direction :input)
+                            (max 0 (- (file-length f) (meta-file-size meta))))))
+    (values broken-chunks
+            bytes-appended)))
 
 (defun write-chunk-from-copies (dest chunk-index meta copies)
   (logmsg 1 "Trying to repair chunk " chunk-index)
@@ -161,33 +166,47 @@
                        (logmsg 1 "Copy chunk is also broken"))))))
   1)
 
-(defun fix-file-length (file meta)
-  (when
-    (with-open-binfile (f file :if-exists :overwrite
-                                 :direction :output
-                                 :if-does-not-exist :error)
-        (> (file-length f) (meta-file-size meta)))
-    (logmsg 1 "Fixing file length")
-    (file-truncate file (meta-file-size meta))))
-
 (defun repair-file (file meta copies)
-  (let ((errors (file-errors file meta)))
-    (unless errors (return-from repair-file nil))
-    (logmsg 1 "Error(s) in " file " : chunk(s) " (join ", " (mapcar #'str errors)))
-    (prog1
-      (reduce #'+
-              (mapcar (lambda (err) (write-chunk-from-copies file err meta copies))
-                      (remove-if [>= _ (length (car (meta-hash-tree meta)))] errors)))
-      (fix-file-length file meta)
-      (file-set-write-date file (meta-file-date meta)))))
+  (let ((errors 0))
+    (m-v-b (broken-chunks bytes-appended)
+           (file-errors file meta)
+      (unless (or broken-chunks (plusp bytes-appended))
+        (return-from repair-file nil))
+      (when (plusp bytes-appended)
+        (logmsg 1 "File has " (str bytes-appended) " extraneous byte(s) : " file)
+        (incf errors (truncate-file file (meta-file-size meta)))
+        (incf errors (set-file-write-date file (meta-file-date meta))))
+      (when broken-chunks
+        (logmsg 1 "Error(s) in " file " : chunk(s) " (join ", " (mapcar #'str broken-chunks)))
+        (incf errors
+              (reduce #'+
+                      (mapcar (lambda (err) (write-chunk-from-copies file err meta copies))
+                              (remove-if [>= _ (length (car (meta-hash-tree meta)))] broken-chunks))))
+        (set-file-write-date file (meta-file-date meta))))
+      errors))
 
-(defun create-new-file (new-filename meta &rest copies)
-  (loop for chunk-index from 0 below (length (car (meta-hash-tree meta)))
-        do (write-chunk-from-copies new-filename chunk-index meta copies))
-  (file-set-write-date file (meta-file-date meta)))
+(defun truncate-file (file length)
+  (if (m-v-b (output exit-code)
+         (sh "which truncate")
+         (zerop exit-code))
+      (m-v-b (output exit-code)
+             (sh (str "truncate -s" length " '" file "'"))
+         (when (plusp exit-code)
+            (logmsg 1 output))
+         exit-code)
+      (let ((newfile (str file ".truncate")))
+        (handler-bind
+          ((file-error (lambda (c) (logmsg 1 "Error accessing file " (file-error-pathname c)) (return-from truncate-file 1))))
+             (with-open-binfile (f file :direction :input)
+                (with-open-binfile (b newfile :direction :output :if-does-not-exist :create)
+                   (loop with seq = (make-array 4096 :element-type '(unsigned-byte 8))
+                         for pos = (read-sequence seq f)
+                         until (= pos 0)
+                         do (write-sequence seq b :end pos))))
+             (rm file)
+             (rename-file newfile file)))))
 
-(defun file-truncate (file length) ;TODO: use cffi + make work on windows -> see truncate in osicat ?
-  (sh (str "truncate -s" length " '" file "'")))
-
-(defun file-set-write-date (file universal-time)   
-  (sh (str "touch -d @" (ut-to-unix universal-time) " '" file "'")))  ;TODO: use cffi + make work on windows -> something in osicat ?
+(defun set-file-write-date (file universal-time)   
+  ;C:\> powershell  (ls your-file-name-here).LastWriteTime = Get-Date
+  ; format date powershell: Thursday, August 30, 2007 11:13:51 AM
+  (nth-value 1 (sh (str "touch -d @" (ut-to-unix universal-time) " '" file "'"))))  ;TODO: make cross platform

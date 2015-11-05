@@ -98,8 +98,8 @@
                                      0
                                      (+ 1 it))
                                  f)))))))
-      (:shorten (hcr::file-truncate path (- (with-open-file (f path) (file-length f)) 1))))
-      (hcr::file-set-write-date path wdate)))
+      (:shorten (hcr::truncate-file path (- (with-open-file (f path) (file-length f)) 1))))
+      (hcr::set-file-write-date path wdate)))
 
 (defun test-check (file mode)
   (let* ((path (str *testdir* "/" file))
@@ -111,8 +111,8 @@
       (is (= 0 exit-code)))
     (alter file mode)
     (is (string/= sum-before
-                      (md5sum path)))
-    (is (~ "/File .* has errors/" (hcr-cli "check" path)))))
+                 (md5sum path)))
+    (is (~ "/1 file\\(s\\) with errors/" (hcr-cli "check" path)))))
 
 (defun test-repair (file mode)
   (let* ((path (str *testdir* "/" file))
@@ -122,12 +122,12 @@
     (hcr-cli "hash" (str path ".bak"))
     (alter file mode)
     (is (string/= sum-before
-                      (md5sum path)))
+                  (md5sum path)))
     (hcr-cli "repair" path (str path ".bak"))
     (is (string= sum-before
-                     (md5sum path)))
+                 (md5sum path)))
     (is (string= sum-before
-                     (md5sum path)))))
+                 (md5sum path)))))
 
 (defvar *all-root* (list "empty" "tiny" "small" "medium" "2chunks"))
 (defvar *all* (append *all-root* (list "subdir/file1" "subdir/file2" "subdir/subsubdir/file3")))
@@ -172,9 +172,9 @@
     (hcr-cli "hash" (str path ".bak"))
     (hcr-cli "repair" path (str path ".bak"))
     (is (string= sum-before
-                     (md5sum path)))
+                 (md5sum path)))
     (is (string= sum-before
-                     (md5sum path)))))
+                 (md5sum path)))))
 
 (test repair-broken-file-with-itself
   (init-files "small")
@@ -186,7 +186,9 @@
                   (md5sum path)))
     (m-v-b (output exit-code)
            (hcr-cli "repair" path path)
-      (is (= 1 exit-code)))  ;TODO: check text output
+      (is (~ "/0 file\\(s\\) repaired/" output))
+      (is (~ "/1 file\\(s\\) not repaired/" output))
+      (is (= 1 exit-code)))
     (is (string/= sum-before
                       (md5sum path)))))
 
@@ -199,11 +201,12 @@
     (is (string/= sum-before
                       (md5sum path)))
     (m-v-b (output exit-code)
-           (hcr-cli "repair" path path) ;TODO: should not need arg twice
-      (is (~ "/File repaired :/" output))
+           (hcr-cli "repair" path)
+      (is (~ "/1 file\\(s\\) repaired/" output))
+      (is (~ "/0 file\\(s\\) not repaired/" output))
       (is (= 0 exit-code)))
     (is (string= sum-before
-                     (md5sum path)))))
+                 (md5sum path)))))
 
 (test repair-non-broken-file-with-broken-file
   (init-files "small")
@@ -214,9 +217,13 @@
       (sh (str "cp '" path "' '" bakpath "'"))
       (hcr-cli "hash" bakpath)
       (alter "small.bak" :overwrite)
-      (hcr-cli "repair" path bakpath)) ;TODO check output
+      (m-v-b (output exit-code)
+             (hcr-cli "repair" path bakpath)
+        (is (~ "/1 file\\(s\\) repaired/" output))
+        (is (~ "/0 file\\(s\\) not repaired/" output))
+        (is (= 0 exit-code))))
     (is (string= sum-before
-                     (md5sum path)))))
+                 (md5sum path)))))
 
 (test repair-very-broken-file
   (init-files "small")
@@ -231,9 +238,13 @@
       (alter "small" :append)
       (is (string/= sum-before
                    (md5sum path)))
-      (hcr-cli "repair" path bakpath)) ;TODO check output
+      (m-v-b (output exit-code)
+             (hcr-cli "repair" path bakpath)
+        (is (~ "/1 file\\(s\\) repaired/" output))
+        (is (~ "/0 file\\(s\\) not repaired/" output))
+        (is (= 0 exit-code))))
     (is (string= sum-before
-                     (md5sum path)))))
+                 (md5sum path)))))
 
 (test repair-broken-file-with-file-broken-elsewhere
   (init-files "small")
@@ -245,9 +256,13 @@
       (hcr-cli "hash" bakpath)
       (alter "small" :overwrite)
       (alter "small.bak" :overwrite 9)
-      (hcr-cli "repair" path bakpath)) ;TODO check output
+      (m-v-b (output exit-code)
+             (hcr-cli "repair" path bakpath)
+        (is (~ "/1 file\\(s\\) repaired/" output))
+        (is (~ "/0 file\\(s\\) not repaired/" output))
+        (is (= 0 exit-code))))
     (is (string= sum-before
-                     (md5sum path)))))
+                 (md5sum path)))))
 
 (test hash-with-corrupt-metadata
   (init-files "small")
@@ -275,8 +290,10 @@
   (mapcar [alter _ :overwrite] *all*)
   (m-v-b (output exit-code)
          (hcr-cli "check" *testdir*)
+    (is (= (length (~ "/File .* has 1 extraneous byte/g" output))
+           1))
     (is (= (length (~ "/File .* has errors/g" output))
-           (length *all*)))))
+           (- (length *all*) 1)))))
 
 (test repair-dir
   (init-files)
@@ -293,8 +310,11 @@
                       md5sums)))
       (m-v-b (output exit-code)
              (hcr-cli "check" *testdir*)
+        (is (plusp exit-code)) 
+        (is (= (length (~ "/File .* has 1 extraneous byte/g" output))
+               1))
         (is (= (length (~ "/File .* has errors/g" output))
-               (length *all*))))
+               (- (length *all*) 1))))
       (m-v-b (output exit-code)
              (hcr-cli "repair" *testdir* (str *testdir* ".bak"))
             (is (~ (str "/" (length *all*) " file\\(s\\) repaired/") output)))
@@ -332,8 +352,6 @@
     (is (~ "/File not found/" output))
     (is (= 99 exit-code))))
 
-;TODO: test repair unwritable file, test repair with unreadable file, with unredable hmd
-
 (test hash-over-non-readable-hmd ()
   (init-files "small")
   (let* ((path (str *testdir* "/small")))
@@ -342,7 +360,7 @@
     (m-v-b (output exit-code)
            (hcr-cli "hash" path)
       (is (~ "/Error accessing/" output))
-      (is (= 2 exit-code)))))
+      (is (= 1 exit-code)))))
 
 (test hash-non-readable-file ()
   (init-files "small")
@@ -352,7 +370,7 @@
     (m-v-b (output exit-code)
            (hcr-cli "check" path)
       (is (~ "/Error accessing/" output))
-      (is (= 2 exit-code)))))
+      (is (= 1 exit-code)))))
 
 (test check-with-non-readable-hmd ()
   (init-files "small")
@@ -372,7 +390,76 @@
     (m-v-b (output exit-code)
            (hcr-cli "check" path)
       (is (~ "/Error accessing file/" output))
-      (is (= 2 exit-code)))))
+      (is (= 1 exit-code)))))
+
+(test repair-readonly-file-append
+  (init-files "small")
+  (let* ((path (str *testdir* "/small"))
+         (sum-before (md5sum path)))
+    (hcr-cli "hash" path)
+    (alter "small" :append)
+    (is (string/= sum-before
+                      (md5sum path)))
+    (sh (str "chmod -w '" *testdir* "/small'"))
+    (unwind-protect 
+      (m-v-b (output exit-code)
+             (hcr-cli "repair" path)
+        (is (~ "/truncate.*Permission denied/" output))
+        (is (~ "/0 file\\(s\\) repaired/" output))
+        (is (~ "/1 file\\(s\\) not repaired/" output))
+        (is (= 1 exit-code)))
+      (sh (str "chmod +w '" *testdir* "/small'")))))
+
+(test repair-readonly-file-overwrite
+  (init-files "small")
+  (let* ((path (str *testdir* "/small"))
+         (bakpath (str path ".bak"))
+         (sum-before (md5sum path)))
+    (hcr-cli "hash" path)
+    (sh (str "cp '" path "' '" bakpath "'"))
+    (alter "small" :overwrite)
+    (is (string/= sum-before
+                      (md5sum path)))
+    (sh (str "chmod -w '" *testdir* "/small'"))
+    (unwind-protect 
+      (m-v-b (output exit-code)
+             (hcr-cli "repair" path bakpath)
+        (is (~ "/Error accessing file/" output))
+        (is (~ "/0 file\\(s\\) repaired/" output))
+        (is (~ "/1 file\\(s\\) not repaired/" output))
+        (is (= 1 exit-code)))
+      (sh (str "chmod +w '" *testdir* "/small'")))))
+
+(test repair-with-non-readable-hmd
+  (init-files "small")
+  (let* ((path (str *testdir* "/small"))
+         (bakpath (str path ".bak")))
+    (hcr-cli "hash" path)
+    (sh (str "cp '" path "' '" bakpath "'"))
+    (alter "small" :overwrite)
+    (sh (str "chmod -r '" *testdir* "/small.hmd'"))
+    (m-v-b (output exit-code)
+           (hcr-cli "repair" path bakpath)
+      (is (~ "/Error opening metadata file/" output))
+      (is (~ "/0 file\\(s\\) repaired/" output))
+      (is (~ "/1 file\\(s\\) not repaired/" output))
+      (is (= 1 exit-code)))))
+
+(test repair-with-non-readable-file
+  (init-files "small")
+  (let* ((path (str *testdir* "/small"))
+         (bakpath (str path ".bak")))
+    (hcr-cli "hash" path)
+    (sh (str "cp '" path "' '" bakpath "'"))
+    (hcr-cli "hash" bakpath)
+    (alter "small" :overwrite)
+    (sh (str "chmod -r '" bakpath "'"))
+    (m-v-b (output exit-code)
+           (hcr-cli "repair" path bakpath)
+      (is (~ "/Error accessing/" output))
+      (is (~ "/0 file\\(s\\) repaired/" output))
+      (is (~ "/1 file\\(s\\) not repaired/" output))
+      (is (= 1 exit-code)))))
 
 (test check-with-broken-hmd ()
   (init-files "small")
@@ -382,7 +469,7 @@
     (m-v-b (output exit-code)
            (hcr-cli "check" path)
       (is (~ "/Metadata corrupted/" output))
-      (is (= 3 exit-code)))))
+      (is (= 1 exit-code)))))
 
 (test repair-with-broken-hmd ()
   (init-files "small")
@@ -437,15 +524,15 @@
   (let* ((path (str *testdir* "/small")))
     (is (~ "/Hash for .* written/" (hcr-cli "hash" path)))
     (alter "small" :overwrite) ;if the date is wrong but the file ok the date would be fixed automatically, so we have to break the file...
-    (hcr::file-set-write-date path (+ (ut) 1))
+    (hcr::set-file-write-date path (+ (ut) 1))
     (m-v-b (output exit-code)
            (hcr-cli "check" path)
       (is (~ "/Write date in metadata does not match file date/" output))
-      (is (= 2 exit-code)))
+      (is (= 1 exit-code)))
     (m-v-b (output exit-code)
            (hcr-cli "check" "--ignore-date" path)
       (is (~ "/File .* has errors/" output))
-      (is (= 4 exit-code)))))
+      (is (= 1 exit-code)))))
 
 (test repair-with-ignore-date-option ()
   (init-files "small")
@@ -454,7 +541,7 @@
     (is (~ "/Hash for .* written/" (hcr-cli "hash" path)))
     (sh (str "cp '" path "' '" path ".bak'"))
     (alter "small" :overwrite)
-    (hcr::file-set-write-date path (+ (ut) 1))
+    (hcr::set-file-write-date path (+ (ut) 1))
     (is (string/= sum-before
                   (md5sum path)))
     (m-v-b (output exit-code)
@@ -470,7 +557,7 @@
   (init-files "small")
   (let* ((path (str *testdir* "/small")))
     (is (~ "/Hash for .* written/" (hcr-cli "hash" path)))
-    (hcr::file-set-write-date path (+ (ut) 1))
+    (hcr::set-file-write-date path (+ (ut) 1))
     (m-v-b (output exit-code)
            (hcr-cli "check" path)
       (is (~ "/Write date for file was incorrect in metadata. Fixed/" output))

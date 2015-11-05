@@ -3,4 +3,4 @@
 *.fas
 *.fasl
 *.o
-keep
+hcr

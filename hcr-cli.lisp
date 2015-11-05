@@ -1,4 +1,4 @@
-;TODO: Handle C-c gracefuly
+;TODO: Handle C-c gracefuly -> disable debugger
 ;TODO: Handle unforeseen errors gracefuly
 ;
 ;   Copyright 2014-2015 Arnaud Bétrémieux <arnaud@btmx.fr>
@@ -78,7 +78,7 @@
   (values-list
     (append (multiple-value-list (getopt cli-options shortopts longopts))
             nil
- ;TODO
+ ;TODO: deal with invalid command line options
  ;           (loop for opt in cli-options
  ;                 until (string= opt "--")
  ;                 when (and (char= {opt 0} "-")
@@ -172,22 +172,26 @@ Use hcr <command> --help for detailed help on a command"))
   (handler-bind ((meta-open-error (lambda (c) (logmsg 0 "Can't open meta file for " file)   (return-from check-single-file 1)))
                  (meta-corrupted  (lambda (c) (logmsg 0 "Meta file is corrupted for " file) (return-from check-single-file 3)))
                  (file-error      (lambda (c) (logmsg 0 "Error accessing file " (file-error-pathname c)) (return-from check-single-file 2))))
-    (let* ((meta (get-meta file :hmd hmd :ignore-date t))
-           (errors (file-errors file meta)))
-      (cond (errors
-              (if (and (not ignore-date) (meta-outdated meta file))
-                (progn (logmsg 0 "/!\\ Write date in metadata does not match file date:" file)
-                       2)
-                (progn (logmsg 0 "/!\\ File " file " has errors in " (meta-chunk-size meta) "B chunk(s) " (join "," (mapcar 'str errors)))
-                       4)))
-            (t
-              (when (and (not ignore-date) (meta-outdated meta file))
-                (logmsg 1 "Write date for file was incorrect in metadata. Fixed: " file)
-                (setf (meta-file-date meta) (ut-to-unix (file-write-date file)))
-                (setf (meta-meta-date meta) (ut-to-unix (ut)))
-                (write-meta-to-file meta (meta-file-path file)))
-              (logmsg 0 "File " file " looks good")
-              0)))))
+    (let* ((meta (get-meta file :hmd hmd :ignore-date t)))
+      (m-v-b (broken-chunks bytes-appended)
+             (file-errors file meta)
+        (cond ((or broken-chunks (plusp bytes-appended))
+                (if (and (not ignore-date) (meta-outdated meta file))
+                  (progn (logmsg 0 "/!\\ Write date in metadata does not match file date:" file)
+                         2)
+                  (progn (when (plusp bytes-appended)
+                           (logmsg 0 "/!\\ File " file " has " (str bytes-appended) " extraneous byte(s)"))
+                         (when broken-chunks
+                           (logmsg 0 "/!\\ File " file " has errors in " (meta-chunk-size meta) "B chunk(s) " (join "," (mapcar 'str broken-chunks))))
+                         4)))
+              (t
+                (when (and (not ignore-date) (meta-outdated meta file))
+                  (logmsg 1 "Write date for file was incorrect in metadata. Fixed: " file)
+                  (setf (meta-file-date meta) (ut-to-unix (file-write-date file)))
+                  (setf (meta-meta-date meta) (ut-to-unix (ut)))
+                  (write-meta-to-file meta (meta-file-path file)))
+                (logmsg 0 "File " file " looks good")
+                0))))))
 
 (defun list-hashed-files (&rest paths)
   (remove-if-not [probe-file (meta-file-path _)]
@@ -217,7 +221,7 @@ Use hcr <command> --help for detailed help on a command"))
                                                        :ignore-date (in opts "ignore-date"))))
         (logmsg 0 (count 0 it) " file(s) repaired")
         (logmsg 0 (length (remove-if #'zerop it)) " file(s) not repaired")
-        (reduce #'+ it))))
+        (if (some #'plusp it) 1 0))))
     
 (defcmd check ("hmd=" "ignore-date")
   "hcr check [options] <file>*
@@ -237,7 +241,7 @@ Use hcr <command> --help for detailed help on a command"))
                         free-args))
       (logmsg 0 (count 0 it) " file(s) OK")
       (logmsg 0 (length (remove-if #'zerop it)) " file(s) with errors")
-      (reduce #'+ it)))
+      (if (some #'plusp it) 1 0)))
 
 (defcmd hash ("hmd=")
   "Computes metadata for the files passed in arguments."
@@ -247,7 +251,7 @@ Use hcr <command> --help for detailed help on a command"))
   (when (and (in opts "hmd")
              (> (length free-args) 1))
     (logmsg 0 "Can't hash multiple files into a single hmd."))
-  (reduce #'+
+  (awith
     (mapcar (lambda (file) 
                (block hash-file
                  (when (probe-dir file)
@@ -273,4 +277,5 @@ Use hcr <command> --help for detailed help on a command"))
                      (get-meta file)
                      (logmsg 0 "Found up-to-date hash for " file " in " meta-path)))
                   0))
-            free-args)))
+            free-args)
+    (if (some #'plusp it) 1 0)))
