@@ -25,6 +25,17 @@
 (ql:quickload 'hcr-cli)
 (clutch:rm "hcr-cli")
 
-(asdf:make-build :hcr-cli :type :program :prologue-code '(setf *compile-verbose* nil) :epilogue-code '(hcr-cli::main) :move-here "./")
+(asdf:make-build :hcr-cli
+  :type :program
+  :prologue-code '(progn (setf *compile-verbose* nil)
+                         (setf *debugger-hook*
+                               (lambda (condition hook)
+                                  (declare (ignore hook))
+                                  (if (typep condition 'ext:interactive-interrupt)
+                                      (format t "~%~A" condition)
+                                      (format t "~%ERROR: ~A~1%" condition))
+                                  (si:quit 100))))
+  :epilogue-code '(hcr-cli::main)
+  :move-here "./")
 
 (clutch:exit)

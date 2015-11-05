@@ -1,6 +1,4 @@
 (declaim (optimize debug))
-;TODO: Handle C-c gracefuly -> disable debugger
-;TODO: Handle unforeseen errors gracefuly
 ;
 ;   Copyright 2014-2015 Arnaud Bétrémieux <arnaud@btmx.fr>
 ;
