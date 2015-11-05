@@ -1,4 +1,3 @@
-(declaim (optimize debug))
 ;
 ;   Copyright 2014-2015 Arnaud Bétrémieux <arnaud@btmx.fr>
 ;
@@ -23,7 +22,7 @@
    (:export  #:main))
 
 (in-package :hcr-cli)
-(declaim (optimize debug))
+;(declaim (optimize debug))
 (in-readtable clutch)
 
 (define-condition meta-condition  (error) ())
