@@ -141,6 +141,20 @@
     (is (~ "/Unknown command/" output))
     (is (= 9 exit-code))))
 
+(test command-help
+  (m-v-b (output exit-code)
+         (hcr-cli "check" "--help")
+    (is (/~ "/Unknown command/" output))
+    (is (~ "/options:/" output))
+    (is (= 9 exit-code))))
+
+(test simply-help
+  (m-v-b (output exit-code)
+         (hcr-cli "--help")
+    (is (/~ "/Unknown command/" output))
+    (is (~ "/Usage/" output))
+    (is (= 9 exit-code))))
+
 (test hash-file
   (init-files)
   (mapcar 'test-hash-single *all-root*))
@@ -537,7 +551,8 @@
 (test repair-with-ignore-date-option ()
   (init-files "small")
   (let* ((path (str *testdir* "/small"))
-         (sum-before (md5sum path)))
+         (sum-before (md5sum path))
+         (date-before (file-write-date path)))
     (is (~ "/Hash for .* written/" (hcr-cli "hash" path)))
     (sh (str "cp '" path "' '" path ".bak'"))
     (alter "small" :overwrite)
@@ -550,6 +565,7 @@
       (is (= 1 exit-code)))
     (m-v-b (output exit-code)
            (hcr-cli "repair" "--ignore-date" path (str path ".bak"))
+      (is (= (file-write-date path) date-before))
       (is (~ "/File repaired/" output))
       (is (= 0 exit-code)))))
 

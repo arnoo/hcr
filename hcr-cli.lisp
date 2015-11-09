@@ -60,7 +60,7 @@
                (m-v-b (args opts free-args invalid-opts)
                       (my-getopt {args 2 -1}
                                  (str {cmd-opts t} "v")
-                                 {cmd-opts nil})
+                                 (append {cmd-opts nil} (list "help")))
                   (setf *log-level* (count "v" opts :test #'string=))
                   (when invalid-opts
                     (logmsg 0 "Invalid option(s) : " (join ", " invalid-opts)))
@@ -210,6 +210,10 @@ Use hcr <command> --help for detailed help on a command"))
 (defun list-hashed-files (&rest paths)
   (remove-if-not [probe-file (meta-file-path _)]
                  (flatten (mapcar [ls _ :recursive t :files-only t] (flatten paths)))))
+
+(defcmd --help ()
+  "Displays general help"
+  (exit-with-help))
 
 (defcmd hash ("hmd=")
   "Computes metadata for the files passed in arguments."
