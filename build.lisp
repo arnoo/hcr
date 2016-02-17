@@ -1,5 +1,5 @@
 ;
-;   Copyright 2014-2015 Arnaud Betremieux <arnaud@btmx.fr>
+;   Copyright 2014-2016 Arnaud Betremieux <arnaud@btmx.fr>
 ;
 ;   This file is a part of Hcr.
 ;

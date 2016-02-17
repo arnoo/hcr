@@ -1,7 +1,7 @@
 hcr: build.lisp hcr.lisp hcr-cli.lisp hcr.asd hcr-cli.asd
 	which ecl || { echo "Please install ECL to build hcr."; exit 1; }
-#[ ! -e quicklisp.lisp ] && wget https://beta.quicklisp.org/quicklisp.lisp
-#ecl -load quicklisp.lisp -eval '(quicklisp-quickstart:install :path "./quicklisp")'
+	[ ! -e quicklisp.lisp ] && wget https://beta.quicklisp.org/quicklisp.lisp; exit 0
+	ecl -load quicklisp.lisp -eval '(quicklisp-quickstart:install :path "./quicklisp")' -eval '(si:quit)'
 	ecl -load build.lisp
 	mv hcr-cli hcr
 
