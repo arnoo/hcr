@@ -1,3 +1,7 @@
+This repository is archived. I'd recommend [Git-Annex](https://git-annex.branchable.com/) to secure files long-term.
+====================================================================================================================
+
+
 Hcr
 ===
 
